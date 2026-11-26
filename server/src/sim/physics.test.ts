@@ -4,6 +4,7 @@ import type { Species, SpeedMultiplier } from '@tkm/shared';
 import { sim } from './index.js';
 import type { SimState } from './index.js';
 import { mkState, penetration } from './testutil.js';
+import { createRoundWithMap } from './round.js';
 
 const R = UNIT_RADIUS;
 const S = UNIT_SPEED;
@@ -188,7 +189,10 @@ describe('no tunnelling / stability', () => {
   for (const m of [1, 5] as SpeedMultiplier[]) {
     it(`3000 ticks at ${m}x across many seeds: never inside obstacles or outside the world`, () => {
       for (let seed = 1; seed <= 25; seed++) {
-        const st = sim.createRound(seed * 7919 + m, seed % 2 ? 12 : 20);
+        // full obstacle map regardless of OBSTACLES_ENABLED, so obstacle collisions stay exercised
+        const sd = seed * 7919 + m;
+        const st = createRoundWithMap(sd, seed % 2 ? 12 : 20, sim.generateMap(sd));
+        if (st.map.obstacles.length === 0) throw new Error(`seed ${seed}: expected obstacles`);
         check(st, `seed ${seed} start`);
         for (let t = 0; t < 3000; t++) {
           sim.tickSim(st, m);
@@ -199,8 +203,8 @@ describe('no tunnelling / stability', () => {
   }
 
   it('determinism: same seed gives identical trajectories', () => {
-    const a = sim.createRound(4242, 12);
-    const b = sim.createRound(4242, 12);
+    const a = createRoundWithMap(4242, 12, sim.generateMap(4242));
+    const b = createRoundWithMap(4242, 12, sim.generateMap(4242));
     for (let t = 0; t < 1500; t++) {
       const m = sim.speedAt((t * TICK_MS) / 1000);
       sim.tickSim(a, m);

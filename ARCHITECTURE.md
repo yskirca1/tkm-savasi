@@ -83,3 +83,9 @@ Socket: `io({ auth: { token } })` same origin (Vite proxies in dev). Reconnect w
 
 ## Unit rendering
 - Units are drawn as the bare emoji only: no ring/circle/disc around them (the previous colored outline circle is removed, also in the conversion animation's resting state — a brief pop/flash on conversion is still fine). Hitboxes are unchanged (UNIT_RADIUS in the sim); draw the emoji at about the hitbox diameter (≈ 2 × UNIT_RADIUS world units) so what you see matches what collides.
+
+## Open arena + unit layout preview (supersedes "Map preview while picking")
+- Obstacles are off: when `OBSTACLES_ENABLED` (shared) is false, `sim.createRound(seed, n)` uses a map with `obstacles: []` (outer walls only). `sim.generateMap` itself stays as is (still unit-tested, used again if the flag is turned on).
+- The round is created at the START of the picking phase: `state = sim.createRound(seed, unitsPerType)` (seed chosen and logged then). Every `pick:state` carries `map` (state.map) and `units = sim.packUnits(state)` — positions + species of every unit, no velocities. After the picks the SAME state object is used for the round (no re-creation), so the first snapshot's units equal the previewed layout exactly. A reconnecting player gets the same preview.
+- Fairness: all three players see the same layout before anyone picks; the first picker therefore picks with full knowledge of positions but nobody knows directions.
+- Client picking screen: replaces the "This round's map" card with "Starting positions": the arena drawn with the game renderer's look, with every unit drawn as its emoji at its start position (static, no animation), plus a per-species count legend is NOT needed (counts are equal). Must stay readable at 375 px width; the three species cards stay fully visible without scrolling on a 375x812 phone.

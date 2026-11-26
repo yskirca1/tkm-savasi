@@ -1,5 +1,5 @@
 // Game screen (phases intro / playing / roundEnd): canvas arena, HUD, scoreboard, vote bar, effects.
-import { SPECIES_EMOJI, SPECIES_INDEX, SPECIES_LABEL, type GameSnapshot, type RoomState, type SeatIndex, type Species } from '@tkm/shared';
+import { SPECIES_EMOJI, SPECIES_INDEX, SPECIES_LABEL, WORLD_HEIGHT, WORLD_WIDTH, type GameSnapshot, type RoomState, type SeatIndex, type Species } from '@tkm/shared';
 import { avatar, fmtTime, h } from '../dom';
 import { ConversionFx, FireFx } from '../game/effects';
 import { SnapshotBuffer } from '../game/interp';
@@ -27,6 +27,9 @@ export function gameView(ctx: RoomCtx): SubView {
   const stage = h('div', { class: 'stage' }, stageInner);
   const voteBar = h('div', { class: 'vote-bar', hidden: true });
   const roundEndLayer = h('div', { class: 'roundend-overlay', hidden: true });
+  // Scoreboard + arena + vote bar. Stacked (scoreboard above, vote bar below) or, when the window is
+  // wide enough that it gives a bigger arena, side by side: scoreboard | arena | vote bar.
+  const play = h('div', { class: 'play' }, scoreboard, stage, voteBar);
 
   const el = h(
     'div',
@@ -39,9 +42,7 @@ export function gameView(ctx: RoomCtx): SubView {
       h('div', { class: 'hud-center' }, practiceTag, roundEl, h('span', { class: 'hud-clock' }, h('span', { html: icons.clock }), timeEl), speedEl),
       settingsButton(),
     ),
-    scoreboard,
-    stage,
-    voteBar,
+    play,
     fever,
     fxCanvas,
     roundEndLayer,
@@ -57,10 +58,34 @@ export function gameView(ctx: RoomCtx): SubView {
   let raf = 0;
   let room: RoomState | null = null;
 
+  /** Width of each side column (scoreboard / vote bar) in the side-by-side layout. */
+  const SIDE_W = 230;
+  const SIDE_GAP = 24;
+  const MIN_WIDE_W = 900;
+  play.style.setProperty('--side-w', `${SIDE_W}px`);
   const layout = () => {
+    const pw = play.clientWidth;
+    const ph = play.clientHeight;
     const cs = getComputedStyle(stage);
-    const availW = stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 8;
-    const availH = stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - 8;
+    const padW = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + 8;
+    const padH = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) + 8;
+    // Pick the arrangement that gives the larger arena (works for any world aspect).
+    const sbH = el.classList.contains('wide') ? 64 : scoreboard.offsetHeight;
+    const vbH = voteBar.hidden || el.classList.contains('wide') ? 0 : voteBar.offsetHeight;
+    const sideW = 2 * (SIDE_W + SIDE_GAP);
+    const kWide = Math.min((pw - sideW - padW) / WORLD_WIDTH, (ph - padH) / WORLD_HEIGHT);
+    const kStack = Math.min((pw - padW) / WORLD_WIDTH, (ph - sbH - vbH - padH) / WORLD_HEIGHT);
+    const wide = window.innerWidth >= MIN_WIDE_W && kWide >= kStack;
+    el.classList.toggle('wide', wide);
+    let availW: number;
+    let availH: number;
+    if (wide) {
+      availW = pw - sideW - padW;
+      availH = ph - padH;
+    } else {
+      availW = stage.clientWidth - padW;
+      availH = stage.clientHeight - padH;
+    }
     const { w, h: hh } = renderer.fit(availW, availH);
     stageInner.style.width = `${w}px`;
     stageInner.style.height = `${hh}px`;
@@ -68,6 +93,7 @@ export function gameView(ctx: RoomCtx): SubView {
   };
   const ro = new ResizeObserver(() => layout());
   ro.observe(stage);
+  ro.observe(play);
   ro.observe(el);
 
   const applyRoundStart = () => {

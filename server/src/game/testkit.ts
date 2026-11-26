@@ -29,13 +29,8 @@ export class FakePhysics {
     ...realSim,
     createRound: (seed: number, unitsPerType: number): SimState => {
       this.counts = [unitsPerType, unitsPerType, unitsPerType];
-      this.state = {
-        seed,
-        map: realSim.generateMap(seed), // same map the real sim would build (preview == round map)
-        units: this.unitsFor(this.counts),
-        tick: 0,
-        convertedSinceDrain: [],
-      };
+      // Real starting layout + map (honors OBSTACLES_ENABLED); only ticking is faked.
+      this.state = realSim.createRound(seed, unitsPerType);
       return this.state;
     },
     tickSim: (state: SimState) => {

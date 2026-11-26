@@ -447,7 +447,9 @@ img { display: block; }
 .auto-hint { font-size: 0.9rem; color: var(--color-muted-foreground); }
 
 /* ---------- Picking ---------- */
-.picking-main { gap: var(--s4); }
+.app-shell.picking { height: 100dvh; min-height: 0; overflow: hidden; }
+.picking-main { flex: 1 1 0; min-height: 0; overflow-y: auto; gap: var(--s3); padding-top: var(--s3); padding-bottom: calc(var(--s3) + var(--safe-bottom)); }
+.pick-controls { display: flex; flex-direction: column; gap: var(--s3); flex: none; }
 .order-chips { list-style: none; margin: 0; padding: 0; display: flex; gap: var(--s2); justify-content: center; flex-wrap: wrap; }
 .chip {
   display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px 4px 4px; min-height: 40px;
@@ -461,11 +463,19 @@ img { display: block; }
 .chip-done { background: var(--sp-tint); }
 .chip-pick { font-size: 1.1rem; }
 .chip-name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.turn { display: flex; align-items: center; gap: var(--s4); padding: var(--s4); }
+@media (max-width: 480px) {
+  /* keep the three order chips on one row so the starting-positions preview gets the height */
+  .order-chips { flex-wrap: nowrap; gap: 6px; }
+  .order-chips .chip { gap: 4px; padding: 3px 8px 3px 3px; min-height: 34px; font-size: 0.82rem; min-width: 0; }
+  .order-chips .chip-n { width: 24px; height: 24px; }
+  .order-chips .chip-ico, .order-chips .avatar { display: none; }
+  .order-chips .chip-name { max-width: 76px; }
+}
+.turn { display: flex; align-items: center; gap: var(--s3); padding: var(--s3); }
 .my-turn .turn { background: linear-gradient(180deg, var(--color-card), var(--rock-tint)); border-color: var(--rock); animation: glow 1.4s ease-in-out infinite; }
-.turn-text { font-size: clamp(1.4rem, 5vw, 2rem); }
+.turn-text { font-size: clamp(1.2rem, 5vw, 1.8rem); }
 .turn-sub { color: var(--color-muted-foreground); font-weight: 600; }
-.ring { position: relative; width: 72px; height: 72px; flex: none; }
+.ring { position: relative; width: 60px; height: 60px; flex: none; }
 .ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
 .ring-bg { fill: var(--color-input); stroke: var(--color-surface-hi); stroke-width: 7; }
 .ring-fg { fill: none; stroke: #a78bfa; stroke-width: 7; stroke-linecap: round; transition: stroke 0.3s; }
@@ -473,15 +483,20 @@ img { display: block; }
 .ring-num { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--font-heading); font-weight: 700; font-size: 1.5rem; }
 .first-picker { margin: 0; text-align: center; font-weight: 700; font-size: 0.9rem; color: var(--color-muted-foreground); }
 .first-picker:empty { display: none; }
-.map-preview { margin: 0; padding: var(--s3); display: flex; flex-direction: column; gap: var(--s2); }
-.map-preview figcaption { display: flex; align-items: center; gap: 6px; font-family: var(--font-heading); font-weight: 600; font-size: 0.95rem; }
-.map-preview figcaption .icon { width: 16px; height: 16px; color: var(--color-secondary-text); }
-.map-preview-wrap { display: flex; justify-content: center; width: 100%; min-width: 0; }
-.map-preview-canvas { display: block; border: 2px solid var(--ink); border-radius: var(--radius-sm); background: #17142e; max-width: 100%; }
+/* Starting positions preview: takes all remaining height (portrait arena), cards stay above it. */
+.layout-preview { margin: 0; padding: var(--s2) var(--s3) var(--s3); display: flex; flex-direction: column; gap: var(--s2); flex: 1 1 0; min-height: 220px; min-width: 0; }
+.layout-preview figcaption { display: flex; align-items: center; gap: 6px; font-family: var(--font-heading); font-weight: 600; font-size: 0.95rem; }
+.layout-preview figcaption .icon { width: 16px; height: 16px; color: var(--color-secondary-text); }
+.lp-hint { margin-left: auto; font-family: var(--font-body, inherit); font-size: 0.78rem; font-weight: 700; color: var(--color-muted-foreground); }
+.layout-preview-wrap { position: relative; flex: 1 1 0; min-height: 0; width: 100%; }
+.layout-preview-canvas {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  display: block; border: 2px solid var(--ink); border-radius: var(--radius-sm); background: #17142e;
+}
 .species-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s3); }
 .species-card {
   position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px;
-  padding: var(--s4) var(--s2) var(--s3); min-height: 150px; cursor: pointer;
+  padding: var(--s3) var(--s2) var(--s2); min-height: 0; cursor: pointer;
   background: linear-gradient(180deg, var(--color-surface) 0%, var(--sp-tint) 100%);
   border: var(--border-w) solid var(--ink); border-radius: var(--radius-lg);
   box-shadow: 0 6px 0 var(--ink-drop), inset 0 -6px 0 color-mix(in srgb, var(--sp) 35%, transparent);
@@ -493,7 +508,7 @@ img { display: block; }
 .my-turn .species-card:not(:disabled) { box-shadow: 0 6px 0 var(--ink-drop), 0 0 0 4px var(--sp), inset 0 -6px 0 color-mix(in srgb, var(--sp) 35%, transparent); }
 .species-card.locked { opacity: 0.62; filter: saturate(0.6); }
 .species-card.mine { opacity: 1; filter: none; box-shadow: 0 6px 0 var(--ink-drop), 0 0 0 4px var(--sp-deep); }
-.sc-emoji { font-size: clamp(2.4rem, 11vw, 3.4rem); line-height: 1.1; }
+.sc-emoji { font-size: clamp(2rem, 9vw, 3rem); line-height: 1.1; }
 .sc-label { font-family: var(--font-heading); font-weight: 700; font-size: 1.2rem; color: var(--sp-deep); }
 .sc-beats { font-size: 0.78rem; font-weight: 700; color: var(--color-muted-foreground); text-align: center; }
 .sc-owner {
@@ -555,27 +570,37 @@ img { display: block; }
   .sb-name { font-size: 1rem; }
   .sb-emoji { font-size: 2rem; }
 }
-.stage { position: relative; z-index: 0; flex: 1 1 auto; min-height: 0; display: grid; place-items: center; padding: 4px var(--s3) 16px; }
+.play { position: relative; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+.stage { position: relative; z-index: 0; flex: 1 1 0; min-height: 0; display: grid; place-items: center; padding: 4px var(--s3) 16px; }
+/* Wide windows (chosen in JS when it gives a bigger arena): scoreboard | arena | vote bar. */
+.game.wide .play {
+  display: grid; grid-template-columns: minmax(var(--side-w), 1fr) auto minmax(var(--side-w), 1fr); grid-template-rows: minmax(0, 1fr);
+  column-gap: 24px; align-items: center;
+}
+.game.wide .scoreboard { grid-column: 1; justify-self: end; width: var(--side-w); max-width: none; margin: 0; padding: 0; grid-template-columns: minmax(0, 1fr); gap: var(--s3); }
+.game.wide .stage { grid-column: 2; align-self: stretch; padding: 8px 0 20px; }
+.game.wide .vote-bar { grid-column: 3; justify-self: start; width: var(--side-w); margin: 0; flex-direction: column; align-items: stretch; }
+.game.wide .vote-status { flex-direction: column; align-items: flex-start; }
 .stage-inner {
-  position: relative; border-radius: 18px; overflow: hidden;
+  position: relative; border-radius: 18px; overflow: hidden; container-type: size;
   box-shadow: 0 0 0 4px var(--ink), 0 10px 0 4px var(--ink-drop), 0 18px 40px rgba(139, 92, 246, 0.35);
 }
 .arena { display: block; }
 .speed-banner {
   position: absolute; left: 50%; top: 50%; z-index: 3; pointer-events: none;
   transform: translate(-50%, -50%) scale(0.4); opacity: 0;
-  font-family: var(--font-heading); font-weight: 700; font-size: clamp(2.4rem, 11vw, 5rem); white-space: nowrap;
+  font-family: var(--font-heading); font-weight: 700; font-size: clamp(1.8rem, 15cqi, 5rem); white-space: nowrap;
   color: #fff; -webkit-text-stroke: 3px var(--ink-drop); paint-order: stroke fill;
   text-shadow: 0 6px 0 var(--ink-drop), 0 0 30px rgba(245, 158, 11, 0.9), 0 0 60px rgba(236, 72, 153, 0.6);
 }
 .speed-banner.show { animation: bannerPop 1.5s var(--ease) forwards; }
 .intro-overlay { position: absolute; inset: 0; z-index: 4; display: grid; place-items: center; background: rgba(7, 6, 26, 0.45); pointer-events: none; }
 .intro-num {
-  font-family: var(--font-heading); font-weight: 700; font-size: clamp(4rem, 20vw, 9rem); line-height: 1;
+  font-family: var(--font-heading); font-weight: 700; font-size: clamp(3rem, 30cqi, 9rem); line-height: 1;
   color: var(--color-accent); -webkit-text-stroke: 4px var(--ink-drop); paint-order: stroke fill; text-shadow: 0 8px 0 var(--ink-drop), 0 0 40px rgba(245, 158, 11, 0.55);
   animation: countPop 0.5s var(--ease);
 }
-.intro-num.go { color: #4ade80; font-size: clamp(3rem, 14vw, 6rem); }
+.intro-num.go { color: #4ade80; font-size: clamp(2.6rem, 22cqi, 6rem); }
 
 /* Fever (5x): red tint + vignette under HUD, fire particles on top of the arena */
 .fever-overlay {
@@ -607,6 +632,18 @@ img { display: block; }
 .voter.ok { background: #143524; border-color: #22c55e; color: #86efac; }
 .voter .icon { width: 14px; height: 14px; }
 .vote-readonly { font-weight: 700; color: var(--color-muted-foreground); font-size: 0.9rem; }
+@media (max-width: 480px) {
+  /* phone: one-row HUD and a slim vote bar so the portrait arena keeps its height */
+  .game .hud { padding-left: var(--s2); padding-right: var(--s2); gap: 6px; }
+  .game .hud-center { flex-wrap: nowrap; gap: 6px; }
+  .game .hud-center .tag-practice { display: none !important; }
+  .hud-round, .hud-clock, .speed-chip { min-height: 32px; padding: 2px 9px; font-size: 0.92rem; }
+  .speed-chip { min-width: 44px; }
+  .vote-bar { flex-wrap: nowrap; gap: var(--s2); margin: var(--s1) var(--s2) var(--s2); padding: 6px var(--s2); }
+  .vote-bar .btn-vote { min-height: 44px; padding-left: 12px; padding-right: 12px; flex: none; }
+  .vote-status { gap: 4px; font-size: 0.85rem; min-width: 0; }
+  .voter { padding: 1px 7px; font-size: 0.78rem; }
+}
 
 /* Round end */
 .roundend-overlay {
@@ -732,6 +769,9 @@ html[data-reduced-motion] .btn.is-busy::after, html[data-reduced-motion] .spinne
 
 @media (min-width: 900px) {
   .page { padding-top: var(--s6); }
+  .picking-main { max-width: 1200px; flex-direction: row; align-items: stretch; padding-top: var(--s5); }
+  .pick-controls { flex: 0 1 560px; min-width: 0; justify-content: center; }
+  .picking .layout-preview { flex: 1 1 0; min-height: 0; }
   .hud { padding-left: var(--s5); padding-right: var(--s5); }
   .scoreboard { max-width: 900px; margin: 0 auto; width: 100%; }
 }

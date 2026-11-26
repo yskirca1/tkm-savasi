@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { GRID_CELL, UNIT_RADIUS, WORLD_HEIGHT, WORLD_WIDTH } from '@tkm/shared';
+import { GRID_CELL, OBSTACLES_ENABLED, UNIT_RADIUS, WORLD_HEIGHT, WORLD_WIDTH } from '@tkm/shared';
 import { sim } from './index.js';
 import { penetration } from './testutil.js';
+import { createRoundWithMap } from './round.js';
+
+/** Round on the full obstacle map (independent of OBSTACLES_ENABLED). */
+const roundWithObstacles = (seed: number, n: number) => createRoundWithMap(seed, n, sim.generateMap(seed));
 
 const COLS = WORLD_WIDTH / GRID_CELL;
 const ROWS = WORLD_HEIGHT / GRID_CELL;
@@ -58,7 +62,8 @@ describe('map generation', () => {
 describe('createRound placement', () => {
   it('places units clear of obstacles, walls and each other; deterministic', () => {
     for (let seed = 0; seed < 50; seed++) {
-      const st = sim.createRound(seed, 20);
+      const st = roundWithObstacles(seed, 20);
+      expect(st.map.obstacles.length).toBeGreaterThan(0);
       expect(st.units.length).toBe(60);
       expect(st.tick).toBe(0);
       expect(sim.speciesCounts(st)).toEqual([20, 20, 20]);
@@ -77,7 +82,32 @@ describe('createRound placement', () => {
           expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(2 * UNIT_RADIUS);
         }
     }
+    expect(roundWithObstacles(77, 12)).toEqual(roundWithObstacles(77, 12));
+  });
+
+  it('OBSTACLES_ENABLED off: createRound has no obstacles; units inside the world, non-overlapping, deterministic', () => {
+    expect(OBSTACLES_ENABLED).toBe(false);
+    for (let seed = 0; seed < 50; seed++) {
+      const st = sim.createRound(seed, 20);
+      expect(st.map.obstacles).toEqual([]);
+      expect(st.map.width).toBe(WORLD_WIDTH);
+      expect(st.map.height).toBe(WORLD_HEIGHT);
+      expect(sim.speciesCounts(st)).toEqual([20, 20, 20]);
+      for (const u of st.units) {
+        expect(u.x).toBeGreaterThanOrEqual(UNIT_RADIUS);
+        expect(u.y).toBeGreaterThanOrEqual(UNIT_RADIUS);
+        expect(u.x).toBeLessThanOrEqual(WORLD_WIDTH - UNIT_RADIUS);
+        expect(u.y).toBeLessThanOrEqual(WORLD_HEIGHT - UNIT_RADIUS);
+      }
+      for (let i = 0; i < st.units.length; i++)
+        for (let j = i + 1; j < st.units.length; j++) {
+          const a = st.units[i];
+          const b = st.units[j];
+          expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(2 * UNIT_RADIUS);
+        }
+    }
     expect(sim.createRound(77, 12)).toEqual(sim.createRound(77, 12));
+    expect(sim.packUnits(sim.createRound(77, 12))).not.toEqual(sim.packUnits(sim.createRound(78, 12)));
   });
 
   it('packUnits rounds to 0.1 and encodes species index', () => {

@@ -14,6 +14,7 @@ import {
   type SeatIndex,
   type Species,
 } from '@tkm/shared';
+import type { GameSnapshot } from '@tkm/shared';
 import type { Room } from './Room.js';
 import { FORCED_PICK_DELAY_MS, LOBBY_DISCONNECT_GRACE_MS } from './Room.js';
 import { sim as realSim } from '../sim/index.js';
@@ -905,44 +906,76 @@ describe('guests', () => {
   });
 });
 
-describe('map preview while picking', () => {
-  it('pick:state carries the round map; round:start uses the same map; seeds change per round', () => {
+describe('open arena + unit layout preview while picking', () => {
+  /** First game:snapshot sent after the most recent round:start (the tick-0 snapshot). */
+  function firstSnapshotAfterRoundStart(env: Env) {
+    const sent = env.transport.sent;
+    let i = -1;
+    for (let k = sent.length - 1; k >= 0; k--) if (sent[k].event === 'round:start') { i = k; break; }
+    expect(i).toBeGreaterThanOrEqual(0);
+    const snap = sent.slice(i + 1).find((e) => e.event === 'game:snapshot');
+    expect(snap).toBeDefined();
+    return snap!.payload as GameSnapshot;
+  }
+
+  it('pick:state carries map + units; round starts with exactly that layout, no obstacles; layouts change per round', () => {
     const env = setup();
     const room = threeHumans(env);
-    const previews: unknown[] = [];
+    const layouts: number[][] = [];
     const seeds: number[] = [];
     for (let r = 1; r <= 3; r++) {
       const ps = env.transport.last('pick:state')!;
       expect(ps.round).toBe(r);
-      expect(ps.map.obstacles.length).toBeGreaterThan(0);
-      // every pick:state of this round shows the same map
+      expect(ps.map.obstacles).toEqual([]);
+      expect(ps.units.length).toBe(3 * 4 * 3); // unitsPerType 4, [x,y,s] per unit
+      // positions + species only
+      for (let k = 2; k < ps.units.length; k += 3) expect([0, 1, 2]).toContain(ps.units[k]);
       pickAll(env, room);
       const statesThisRound = env.transport.of('pick:state').filter((p) => p.round === r);
       expect(statesThisRound.length).toBeGreaterThan(1);
-      for (const p of statesThisRound) expect(p.map).toEqual(ps.map);
+      for (const p of statesThisRound) {
+        expect(p.map).toEqual(ps.map);
+        expect(p.units).toEqual(ps.units);
+      }
       const rs = env.transport.last('round:start')!;
       expect(rs.round).toBe(r);
       expect(rs.map).toEqual(ps.map);
-      expect(realSim.generateMap(rs.seed)).toEqual(ps.map);
-      previews.push(ps.map);
+      expect(rs.map.obstacles).toEqual([]);
+      const snap0 = firstSnapshotAfterRoundStart(env);
+      expect(snap0.tick).toBe(0);
+      expect(snap0.units).toEqual(ps.units);
+      layouts.push(ps.units);
       seeds.push(rs.seed);
       env.sched.advance(ROUND_INTRO_MS + 1);
       finishRoundSole(env, room, 'rock');
       env.sched.advance(ROUND_END_DELAY_MS + 1);
     }
     expect(new Set(seeds).size).toBe(3);
-    expect(previews[0]).not.toEqual(previews[1]);
+    expect(layouts[0]).not.toEqual(layouts[1]);
+    expect(layouts[1]).not.toEqual(layouts[2]);
     // seed is logged when the pick phase starts, once per round
     expect(env.logs.filter((l) => /round 1 seed/.test(l))).toHaveLength(1);
   });
 
-  it('a reconnecting client gets the map in its pick:state sync', () => {
+  it('with the real sim the previewed layout equals the tick-0 snapshot', () => {
+    const env = setup({ sim: realSim });
+    const room = threeHumans(env);
+    const ps = env.transport.last('pick:state')!;
+    expect(ps.units.length).toBe(36);
+    pickAll(env, room);
+    expect(firstSnapshotAfterRoundStart(env).units).toEqual(ps.units);
+    expect(env.transport.last('round:start')!.map).toEqual(ps.map);
+  });
+
+  it('a reconnecting client gets the same preview in its pick:state sync', () => {
     const env = setup();
     const room = threeHumans(env);
-    const map = room.pickState()!.map;
+    const { map, units } = room.pickState()!;
     env.transport.clear();
     env.mgr.sync(USERS.b.userId);
-    expect(env.transport.last('pick:state')!.map).toEqual(map);
+    const ps = env.transport.last('pick:state')!;
+    expect(ps.map).toEqual(map);
+    expect(ps.units).toEqual(units);
   });
 });
 

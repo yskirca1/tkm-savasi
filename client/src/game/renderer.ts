@@ -1,4 +1,4 @@
-// Canvas renderer: static map layer (night floor, clay obstacles) + bare emoji unit sprites + conversion effects.
+// Canvas renderer: static map layer (night floor, clay obstacles if any) + bare emoji unit sprites + conversion effects.
 // Units are drawn as the emoji only (no disc/ring): the visible glyph spans the hitbox diameter (2 x UNIT_RADIUS).
 import { GRID_CELL, SPECIES_EMOJI, UNIT_RADIUS, WORLD_HEIGHT, WORLD_WIDTH, type MapData, type Rect, type Species } from '@tkm/shared';
 import { reducedMotion } from '../settings';
@@ -32,15 +32,10 @@ export class GameRenderer {
 
   /** Fit the world into (availW, availH) CSS px preserving aspect. Returns the canvas CSS size. */
   fit(availW: number, availH: number): { w: number; h: number } {
-    const aspect = WORLD_WIDTH / WORLD_HEIGHT;
-    let w = Math.max(60, availW);
-    let h = w / aspect;
-    if (h > availH && availH > 120) {
-      h = availH;
-      w = h * aspect;
-    }
-    w = Math.floor(w);
-    h = Math.floor(w / aspect);
+    // Fits by width or height, whichever limits (works for any world aspect, portrait or landscape).
+    const k = Math.max(40 / Math.max(WORLD_WIDTH, WORLD_HEIGHT), Math.min(availW / WORLD_WIDTH, availH / WORLD_HEIGHT));
+    const w = Math.floor(WORLD_WIDTH * k);
+    const h = Math.floor(WORLD_HEIGHT * k);
     const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
     if (w === this.cssW && h === this.cssH && dpr === this.dpr) return { w, h };
     this.cssW = w;
@@ -94,10 +89,30 @@ export class GameRenderer {
     for (const o of this.map?.obstacles ?? []) drawClayBlock(g, o);
   }
 
-  /** Map only (floor, walls, obstacles) — used for the picking-screen preview. */
+  /** Map only (floor, walls, obstacles). */
   drawStatic(): void {
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.drawImage(this.staticLayer, 0, 0);
+  }
+
+  /**
+   * Static starting layout for the picking-screen preview: the map plus every unit as its in-game
+   * sprite. `units` is the flat [x, y, s, ...] wire format (same as GameSnapshot.units).
+   */
+  drawLayout(units: readonly number[]): void {
+    this.drawStatic();
+    if (!this.sprites.length) return;
+    const k = this.scale * this.dpr;
+    const base = this.spriteSize();
+    for (let i = 0; i + 2 < units.length; i += 3) {
+      const spr = this.sprites[units[i + 2]];
+      if (spr) this.ctx.drawImage(spr, units[i] * k - base / 2, units[i + 1] * k - base / 2, base, base);
+    }
+  }
+
+  /** Drawn sprite size in device px (sprites are rasterised SPRITE_OVERSAMPLE x larger). */
+  private spriteSize(): number {
+    return this.sprites[0].width / SPRITE_OVERSAMPLE;
   }
 
   draw(sample: Sample | null, fx: ConversionFx, now: number): void {
@@ -106,7 +121,7 @@ export class GameRenderer {
     ctx.drawImage(this.staticLayer, 0, 0);
     if (!sample || !this.sprites.length) return;
     const k = this.scale * this.dpr;
-    const base = this.sprites[0].width / SPRITE_OVERSAMPLE;
+    const base = this.spriteSize();
     const popping: { x: number; y: number; p: number; s: number }[] = [];
     for (let i = 0; i < sample.n; i++) {
       const p = fx.progress(i, now);

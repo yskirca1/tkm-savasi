@@ -17,7 +17,6 @@ import {
   TICK_RATE,
   VOTE_OPEN_SEC,
   type GameSnapshot,
-  type MapData,
   type MatchEnd,
   type PickState,
   type RoomPhase,
@@ -100,10 +99,15 @@ interface PhaseTimer {
 
 interface PickRuntime {
   order: [SeatIndex, SeatIndex, SeatIndex];
-  /** Round seed chosen at pick-phase start; createRound uses the same one. */
+  /** Round seed chosen at pick-phase start. */
   seed: number;
-  /** sim.generateMap(seed): previewed while picking (no unit positions). */
-  map: MapData;
+  /**
+   * The round's sim state, created at pick-phase start and reused as-is for the round
+   * (never ticked while picking), so the previewed layout is exactly the starting layout.
+   */
+  state: SimState;
+  /** sim.packUnits(state) at creation: positions + species only (no velocities). */
+  previewUnits: number[];
   turn: number;
   botThinking: boolean;
 }
@@ -246,10 +250,11 @@ export class Room {
 
   pickState(): PickState | null {
     if (!this.pick) return null;
-    const { order, turn, botThinking, map } = this.pick;
+    const { order, turn, botThinking, state, previewUnits } = this.pick;
     return {
       round: this.round,
-      map,
+      map: state.map,
+      units: [...previewUnits],
       order: [...order],
       turn,
       currentSeat: turn < 3 ? order[turn] : null,
@@ -662,15 +667,18 @@ export class Room {
     this.lastRoundEnd = null;
     const roundInBlock = (r - 1) % 3;
     if (roundInBlock === 0) this.blockPerm = this.deps.sim.randomSeatPerm(this.deps.random);
-    // Seed is chosen now so the map can be previewed during picking; finishPicks reuses it.
+    // The round is created now so its map + unit layout can be previewed while picking;
+    // finishPicks reuses this exact state object.
     const seed = Math.floor(this.deps.random() * 0x1_0000_0000) >>> 0;
     this.log(`round ${r} seed ${seed}`);
+    const state = this.deps.sim.createRound(seed, this.deps.unitsPerType);
     this.pick = {
       order: this.deps.sim.pickOrder(this.blockPerm, roundInBlock),
       turn: 0,
       botThinking: false,
       seed,
-      map: this.deps.sim.generateMap(seed),
+      state,
+      previewUnits: this.deps.sim.packUnits(state),
     };
     this.phase = 'picking';
     this.emitState();
@@ -737,7 +745,8 @@ export class Room {
     const seatSpecies = this.picks as [Species, Species, Species];
     const seed = pick ? pick.seed : Math.floor(this.deps.random() * 0x1_0000_0000) >>> 0;
     this.seatSpecies = [...seatSpecies];
-    this.simState = this.deps.sim.createRound(seed, this.deps.unitsPerType);
+    // Same state object that was previewed during picking (no re-creation).
+    this.simState = pick ? pick.state : this.deps.sim.createRound(seed, this.deps.unitsPerType);
     this.playTicks = 0;
     this.approvals.clear();
     this.lastCounts = this.deps.sim.speciesCounts(this.simState);

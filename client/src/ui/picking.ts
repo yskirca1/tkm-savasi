@@ -42,19 +42,27 @@ export function pickingView(ctx: RoomCtx): SubView {
   const scores = h('ul', { class: 'mini-scores', 'aria-label': 'Scores' });
   const firstLine = h('p', { class: 'first-picker' });
 
-  // Map preview (obstacles + walls only, same style as the game canvas). Below the cards so they stay visible.
-  const mapCanvas = h('canvas', { class: 'map-preview-canvas', role: 'img', 'aria-label': "This round's map" });
-  const mapWrap = h('div', { class: 'map-preview-wrap' }, mapCanvas);
-  const mapFig = h('figure', { class: 'map-preview card', hidden: true }, h('figcaption', null, h('span', { html: icons.flag }), "This round's map"), mapWrap);
-  const mapRenderer = new GameRenderer(mapCanvas);
-  let mapKey = '';
-  const drawMap = () => {
-    if (mapFig.hidden) return;
-    mapRenderer.fit(mapWrap.clientWidth, 200);
-    mapRenderer.drawStatic();
+  // Starting positions: the arena (game renderer look) with every unit's emoji at its start position.
+  // Static — directions are only revealed when the round starts.
+  const layoutCanvas = h('canvas', { class: 'layout-preview-canvas', role: 'img', 'aria-label': 'Starting positions of all units' });
+  const layoutWrap = h('div', { class: 'layout-preview-wrap' }, layoutCanvas);
+  const layoutFig = h(
+    'figure',
+    { class: 'layout-preview card', hidden: true },
+    h('figcaption', null, h('span', { html: icons.eye }), h('span', { class: 'lp-title' }, 'Starting positions'), h('span', { class: 'lp-hint' }, 'Directions stay secret')),
+    layoutWrap,
+  );
+  const layoutRenderer = new GameRenderer(layoutCanvas);
+  let layoutKey = '';
+  let layoutUnits: number[] = [];
+  const drawLayout = () => {
+    if (layoutFig.hidden) return;
+    // canvas has a 2px border on each side
+    layoutRenderer.fit(layoutWrap.clientWidth - 4, layoutWrap.clientHeight - 4);
+    layoutRenderer.drawLayout(layoutUnits);
   };
-  const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => drawMap()) : null;
-  ro?.observe(mapWrap);
+  const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => drawLayout()) : null;
+  ro?.observe(layoutWrap);
 
   const el = h(
     'div',
@@ -66,7 +74,12 @@ export function pickingView(ctx: RoomCtx): SubView {
       roundLabel,
       h('div', { class: 'topbar-actions' }, settingsButton()),
     ),
-    h('main', { class: 'page picking-main' }, firstLine, chips, h('section', { class: 'turn card' }, ring, h('div', { class: 'turn-texts' }, turnText, turnSub)), cardsEl, mapFig, scores),
+    h(
+      'main',
+      { class: 'page picking-main' },
+      h('div', { class: 'pick-controls' }, firstLine, chips, h('section', { class: 'turn card' }, ring, h('div', { class: 'turn-texts' }, turnText, turnSub)), cardsEl, scores),
+      layoutFig,
+    ),
   );
 
   let raf = 0;
@@ -128,15 +141,19 @@ export function pickingView(ctx: RoomCtx): SubView {
       const first = p ? p.order[0] : null;
       firstLine.textContent = first === null ? '' : first === me ? 'You pick first this round' : `${seatName(room.seats[first])} picks first this round`;
 
-      // Map preview: same map the round will be played on.
+      // Starting positions: same map + layout the round will start with.
       const map = p?.map ?? null;
-      mapFig.hidden = !map;
-      const k = map ? `${room.round}:${JSON.stringify(map.obstacles)}` : '';
-      if (map && k !== mapKey) {
-        mapKey = k;
-        mapRenderer.setMap(map);
+      const units = p?.units ?? null;
+      layoutFig.hidden = !map || !units;
+      if (map && units) {
+        const k = `${room.round}:${JSON.stringify(map.obstacles)}:${units.join(',')}`;
+        if (k !== layoutKey) {
+          layoutKey = k;
+          layoutUnits = units;
+          layoutRenderer.setMap(map);
+        }
+        requestAnimationFrame(drawLayout);
       }
-      if (map) requestAnimationFrame(drawMap);
 
       // Turn banner
       el.classList.toggle('my-turn', myTurn);

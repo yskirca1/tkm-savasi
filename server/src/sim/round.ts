@@ -1,4 +1,4 @@
-import { GRID_CELL, SPECIES, SPECIES_INDEX, UNIT_RADIUS, UNIT_SPEED } from '@tkm/shared';
+import { GRID_CELL, OBSTACLES_ENABLED, SPECIES, SPECIES_INDEX, UNIT_RADIUS, UNIT_SPEED } from '@tkm/shared';
 import type { MapData, Species } from '@tkm/shared';
 import type { SimState, Unit } from './api.js';
 import { blockedGrid, generateMap } from './map.js';
@@ -22,8 +22,25 @@ function positionOk(map: MapData, units: Unit[], x: number, y: number): boolean 
   return true;
 }
 
-export function createRound(seed: number, unitsPerType: number): SimState {
+/**
+ * Map a round is played on: the generated map when OBSTACLES_ENABLED, else the same world
+ * with outer walls only (no obstacles).
+ */
+export function roundMap(seed: number, obstacles: boolean = OBSTACLES_ENABLED): MapData {
   const map = generateMap(seed);
+  return obstacles ? map : { ...map, obstacles: [] };
+}
+
+/** SimApi.createRound: honors OBSTACLES_ENABLED. */
+export function createRound(seed: number, unitsPerType: number): SimState {
+  return createRoundWithMap(seed, unitsPerType, roundMap(seed));
+}
+
+/**
+ * Internal: place units on a given map. Exported so tests can exercise obstacle maps
+ * (e.g. `createRoundWithMap(seed, n, generateMap(seed))`) regardless of OBSTACLES_ENABLED.
+ */
+export function createRoundWithMap(seed: number, unitsPerType: number, map: MapData): SimState {
   const rng = createRng(deriveSeed(seed, 2));
   const units: Unit[] = [];
   const count = Math.max(0, Math.floor(unitsPerType));
