@@ -20,5 +20,7 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+      - key: GOOGLE_ENABLED
+        value: "false"
       - key: UNITS_PER_TYPE
         value: "12"
