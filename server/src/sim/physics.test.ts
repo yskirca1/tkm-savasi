@@ -11,7 +11,7 @@ const S = UNIT_SPEED;
 function headOn(a: Species, b: Species): SimState {
   return mkState([
     { x: 400, y: 300, vx: S, vy: 0, species: a },
-    { x: 440, y: 300, vx: -S, vy: 0, species: b },
+    { x: 400 + 2 * R + 18, y: 300, vx: -S, vy: 0, species: b },
   ]);
 }
 function runUntilContactDone(st: SimState, ticks = 30): void {

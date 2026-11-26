@@ -22,16 +22,16 @@ export type SeatIndex = 0 | 1 | 2;
 
 // ---------- World / simulation ----------
 /** Logical world size in world units. The client scales it to the screen keeping aspect ratio. */
-export const WORLD_WIDTH = 720;
-export const WORLD_HEIGHT = 480;
-/** Map generation grid cell (world units). WORLD is 24 x 16 cells. Obstacles are cell-aligned. */
-export const GRID_CELL = 30;
-export const UNIT_RADIUS = 11;
+export const WORLD_WIDTH = 900;
+export const WORLD_HEIGHT = 600;
+/** Map generation grid cell (world units). WORLD is 15 x 10 cells of 60. Obstacles are cell-aligned. */
+export const GRID_CELL = 60;
+export const UNIT_RADIUS = 20;
 /** Base speed in world units per second at 1x. */
 export const UNIT_SPEED = 90;
 export const DEFAULT_UNITS_PER_TYPE = 12;
 export const MIN_UNITS_PER_TYPE = 4;
-export const MAX_UNITS_PER_TYPE = 20;
+export const MAX_UNITS_PER_TYPE = 16;
 
 /** Server simulation ticks per second. */
 export const TICK_RATE = 30;

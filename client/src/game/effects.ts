@@ -1,6 +1,7 @@
 // Visual effects: unit conversion pops and the 5x "fever" fire along the screen edges.
 
-export const CONVERT_MS = 450;
+/** Conversion pop duration (ring-free: the emoji itself pops and flashes). */
+export const CONVERT_MS = 250;
 
 /** Tracks per-unit conversion animation start times. */
 export class ConversionFx {
@@ -28,11 +29,11 @@ export class ConversionFx {
   }
 }
 
-/** Pop curve: quick overshoot then settle (1 → 1.55 → 1). */
+/** Pop curve: quick overshoot then settle (1 → 1.35 → 1). */
 export function popScale(p: number): number {
   if (p < 0) return 1;
-  if (p < 0.35) return 1 + 0.55 * (p / 0.35);
-  return 1 + 0.55 * (1 - easeOutCubic((p - 0.35) / 0.65));
+  if (p < 0.35) return 1 + 0.35 * (p / 0.35);
+  return 1 + 0.35 * (1 - easeOutCubic((p - 0.35) / 0.65));
 }
 export function easeOutCubic(x: number): number {
   return 1 - Math.pow(1 - x, 3);
