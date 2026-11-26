@@ -54,3 +54,17 @@ From provider name: lowercase, Turkish chars → ascii (ç→c, ğ→g, ı→i, 
 `/login`, `/register`, `/forgot`, `/reset`, `/` (home), `/profile`, `/r/:code` (lobby → picking → game → round end → match end, all driven by room phase), `/welcome` (pick username on first login).
 Client auth module abstracts the modes: supabase mode uses supabase-js (`flowType:'implicit'`, `detectSessionInUrl:true`) for Google OAuth (`signInWithOAuth({provider:'google', options:{redirectTo: origin}})`), session storage/refresh (`setSession` with tokens returned by our REST login/register), and password recovery (`PASSWORD_RECOVERY` event → `updateUser({password})`). Dev mode stores AuthSession in localStorage and uses /api/auth/refresh, /api/auth/reset.
 Socket: `io({ auth: { token } })` same origin (Vite proxies in dev). Reconnect with fresh token.
+
+## Quick match (matchmaking)
+- `room:quick` (ack `{code}`): if the user already sits in a room → same handling as joining another room (leave old one first, unless it is the same kind of rejoin case used by room:join for an in-progress match: then return that room's code). Otherwise find the oldest room with `quick != null`, phase `lobby`, and an empty seat → seat the user there; else create a new room with `quick`, `totalRounds = QUICK_MATCH_ROUNDS`, the user as host.
+- Quick rooms behave exactly like normal rooms (3 humans → auto-start; host may still press start-with-bot at 2 humans; host cannot change rounds in quick rooms → error). They can also be joined by code/link.
+- Auto-start timer: whenever a quick room in lobby has exactly 2 humans, a QUICK_MATCH_BOT_WAIT_MS timer runs (restart it when the pair changes, cancel when the count is not 2). On expiry: seat a bot and start. `RoomState.quick.autoStartInMs` carries the remaining ms at send time (null when no timer). Non-quick rooms send `quick: null`.
+- After `match:rematch` a quick room is a quick lobby again (open to matchmaking, timer rule applies).
+- Client: Home has a prominent "Quick match" button (emit room:quick → navigate to /r/CODE). Lobby of a quick room shows a "Quick match" badge, hides the rounds selector (shows "6 rounds" read-only), and shows status: 1 human → "Looking for players…", 2 humans → "Starting with a computer in Ns unless a third player joins" (local countdown from autoStartInMs).
+
+## Practice (solo vs computers)
+- `room:practice` (ack `{code}`): leave any current room, create a room with `practice: true`, `quick: null`, `totalRounds = PRACTICE_ROUNDS`, the user in seat 0 as host, bots in seats 1 and 2, and start the match immediately (no lobby wait). Not joinable by code by other users (error "This is a practice room") and never matched by quick match.
+- Everything else is the normal match flow (picking, bots, speed tiers, vote, pause/reconnect). If the human times out after a disconnect → delete the room instead of bot takeover.
+- Stats: practice matches are NEVER saved (no Store.saveMatch call). Non-practice rooms send `practice: false`.
+- `match:rematch` in a practice room starts a new practice match immediately (same human + two bots).
+- Client: Home has a "Practice vs computer" button (secondary style, below Quick match / Create room) with the hint "Doesn't count toward your stats". In-game HUD and match-end screen show a small "Practice" badge; match end shows "Practice match — stats unchanged".

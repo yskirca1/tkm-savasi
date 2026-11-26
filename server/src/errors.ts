@@ -29,6 +29,8 @@ export const MSG = {
   paused: 'The game is paused',
   notInRoom: "You're not in a room",
   invalidRounds: 'Invalid number of rounds',
+  practiceRoom: 'This is a practice room',
+  quickRoundsFixed: 'The number of rounds is fixed in quick match',
   voteClosed: "Voting isn't open right now",
 } as const;
 

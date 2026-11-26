@@ -58,6 +58,11 @@ export const ROUND_END_DELAY_MS = 4_000;
 /** Short countdown shown after picks before units start moving. */
 export const ROUND_INTRO_MS = 1_500;
 export const RECONNECT_GRACE_MS = 30_000;
+/** Quick match: rounds per match, and wait for a 3rd player once 2 humans are in the lobby. */
+export const QUICK_MATCH_ROUNDS: RoundOption = 6;
+export const QUICK_MATCH_BOT_WAIT_MS = 20_000;
+/** Solo practice vs computers: rounds per match. */
+export const PRACTICE_ROUNDS: RoundOption = 3;
 
 // ---------- Account rules ----------
 export const USERNAME_MIN = 3;
@@ -99,6 +104,14 @@ export interface RoomState {
   scores: [number, number, number];
   /** Species of each seat in the current round (null until picked). */
   picks: [Species | null, Species | null, Species | null];
+  /**
+   * Non-null for matchmaking ("Quick match") rooms. Such rooms are open to any player using quick match
+   * while in lobby. autoStartInMs: ms (at send time) until the room auto-starts with a computer in the
+   * third seat; non-null only while the lobby holds exactly 2 humans. Client counts down locally.
+   */
+  quick: { autoStartInMs: number | null } | null;
+  /** True for solo practice rooms (1 human vs 2 computers). Practice matches never write stats. */
+  practice: boolean;
   /** Non-null while paused waiting for disconnected humans. */
   paused: { waitingFor: string[]; resumeDeadline: number } | null;
 }
@@ -187,6 +200,10 @@ export type Ack<T = {}> = (res: ({ ok: true } & T) | { ok: false; error: string 
 export interface ClientToServerEvents {
   'room:create': (p: { totalRounds?: RoundOption }, ack: Ack<{ code: string }>) => void;
   'room:join': (p: { code: string }, ack: Ack<{ code: string }>) => void;
+  /** Solo practice vs two computers: creates a private practice room and starts immediately. No stats. */
+  'room:practice': (p: {}, ack: Ack<{ code: string }>) => void;
+  /** Matchmaking: join an open quick-match lobby or create one. Client then navigates to /r/<code>. */
+  'room:quick': (p: {}, ack: Ack<{ code: string }>) => void;
   'room:leave': () => void;
   'room:setRounds': (p: { totalRounds: RoundOption }) => void;
   'room:startWithBot': () => void;

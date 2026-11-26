@@ -47,7 +47,16 @@ export function lobbyView(ctx: RoomCtx): SubView {
 
   const codeTiles = h('div', { class: 'code-tiles', 'aria-label': `Room code ${ctx.code.split('').join(' ')}`, role: 'img' }, ...ctx.code.split('').map((c) => h('span', { class: 'code-tile', 'aria-hidden': 'true' }, c)));
 
+  const inviteHint = h('p', { class: 'hint' }, 'Send the link to your friends or tell them the code.');
   const seatsEl = h('ul', { class: 'seats', 'aria-label': 'Players' });
+  // Quick match: badge in the top bar + status line (with a local countdown) above the seats.
+  const quickBadge = h('span', { class: 'tag tag-quick', hidden: true }, h('span', { html: icons.bolt }), 'Quick match');
+  const quickStatus = h('section', { class: 'card quick-status', hidden: true });
+  let countdown: ReturnType<typeof setInterval> | undefined;
+  const stopCountdown = () => {
+    if (countdown) clearInterval(countdown);
+    countdown = undefined;
+  };
   const roundsEl = h('div', { class: 'rounds' });
   const actions = h('div', { class: 'lobby-actions' });
 
@@ -58,7 +67,7 @@ export function lobbyView(ctx: RoomCtx): SubView {
       'header',
       { class: 'topbar' },
       h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Leave room', title: 'Leave room', html: icons.back, onclick: () => ctx.leave() }),
-      h('span', { class: 'topbar-title' }, 'Lobby'),
+      h('span', { class: 'topbar-title' }, 'Lobby', quickBadge),
       h('div', { class: 'topbar-actions' }, settingsButton()),
     ),
     h(
@@ -71,8 +80,9 @@ export function lobbyView(ctx: RoomCtx): SubView {
         h('p', { class: 'eyebrow' }, 'Room code'),
         codeTiles,
         h('div', { class: 'invite-row' }, linkInput, copyBtn, shareBtn),
-        h('p', { class: 'hint' }, 'Send the link to your friends or tell them the code.'),
+        inviteHint,
       ),
+      quickStatus,
       seatsEl,
       h('section', { class: 'card lobby-settings' }, roundsEl, actions),
     ),
@@ -96,43 +106,82 @@ export function lobbyView(ctx: RoomCtx): SubView {
     );
   };
 
+  /** Status line for quick rooms. The countdown deadline is re-derived from every room:state (roomAt). */
+  const renderQuick = (room: RoomState, humans: number, roomAt: number) => {
+    stopCountdown();
+    quickBadge.hidden = !room.quick;
+    quickStatus.hidden = !room.quick;
+    inviteHint.textContent = room.quick
+      ? 'Matchmaking is on. You can still invite a friend with the link or code.'
+      : 'Send the link to your friends or tell them the code.';
+    if (!room.quick) return;
+    const ms = room.quick.autoStartInMs;
+    if (humans === 2 && ms !== null) {
+      const deadline = roomAt + ms;
+      const secs = h('strong', { class: 'quick-secs' });
+      const draw = () => {
+        secs.textContent = `${Math.max(0, Math.ceil((deadline - performance.now()) / 1000))}s`;
+      };
+      draw();
+      quickStatus.replaceChildren(
+        h('span', { class: 'quick-status-icon', 'aria-hidden': 'true', html: icons.clock }),
+        h('p', { class: 'quick-status-text' }, 'Starting with a computer in ', secs, ' unless a third player joins'),
+      );
+      countdown = setInterval(draw, 250);
+    } else {
+      quickStatus.replaceChildren(
+        h('span', { class: 'spinner sm', 'aria-hidden': 'true' }),
+        h('p', { class: 'quick-status-text', role: 'status' }, 'Looking for players…'),
+      );
+    }
+  };
+
   return {
     el,
     update(s: NetState) {
       const room = s.room!;
       const isHost = room.hostUserId === ctx.userId;
       seatsEl.replaceChildren(...room.seats.map((seat) => seatCard(seat, room)));
-
-      // Round selector
-      const name = 'rounds-' + ctx.code;
-      const group = h(
-        'fieldset',
-        { class: 'segmented', disabled: !isHost },
-        h('legend', null, 'Rounds'),
-        ...ROUND_OPTIONS.map((n) => {
-          const id = `${name}-${n}`;
-          return h(
-            'span',
-            { class: 'seg' },
-            h('input', {
-              type: 'radio',
-              name,
-              id,
-              value: String(n),
-              checked: room.totalRounds === n,
-              onchange: () => send.setRounds(n),
-            }),
-            h('label', { for: id }, String(n)),
-          );
-        }),
-      );
-      const focused = document.activeElement as HTMLInputElement | null;
-      const refocus = focused && roundsEl.contains(focused) ? focused.value : null;
-      roundsEl.replaceChildren(group);
-      if (!isHost) roundsEl.appendChild(h('p', { class: 'hint' }, 'The host chooses the number of rounds.'));
-      if (refocus) (roundsEl.querySelector(`input[value="${refocus}"]`) as HTMLInputElement | null)?.focus();
-
       const humans = room.seats.filter((x) => x.kind === 'human').length;
+      renderQuick(room, humans, s.roomAt);
+
+      if (room.quick) {
+        // Quick rooms have a fixed round count: read-only.
+        roundsEl.replaceChildren(
+          h('div', { class: 'rounds-fixed' }, h('span', { class: 'rounds-fixed-label' }, 'Rounds'), h('strong', { class: 'rounds-fixed-value' }, `${room.totalRounds} rounds`)),
+          h('p', { class: 'hint' }, 'Quick matches always play a fixed number of rounds.'),
+        );
+      } else {
+        // Round selector
+        const name = 'rounds-' + ctx.code;
+        const group = h(
+          'fieldset',
+          { class: 'segmented', disabled: !isHost },
+          h('legend', null, 'Rounds'),
+          ...ROUND_OPTIONS.map((n) => {
+            const id = `${name}-${n}`;
+            return h(
+              'span',
+              { class: 'seg' },
+              h('input', {
+                type: 'radio',
+                name,
+                id,
+                value: String(n),
+                checked: room.totalRounds === n,
+                onchange: () => send.setRounds(n),
+              }),
+              h('label', { for: id }, String(n)),
+            );
+          }),
+        );
+        const focused = document.activeElement as HTMLInputElement | null;
+        const refocus = focused && roundsEl.contains(focused) ? focused.value : null;
+        roundsEl.replaceChildren(group);
+        if (!isHost) roundsEl.appendChild(h('p', { class: 'hint' }, 'The host chooses the number of rounds.'));
+        if (refocus) (roundsEl.querySelector(`input[value="${refocus}"]`) as HTMLInputElement | null)?.focus();
+      }
+
       actions.replaceChildren();
       if (isHost) {
         const start = btn('Start with computer', { icon: icons.bot, variant: 'primary', block: true, onclick: () => send.startWithBot() });
@@ -147,6 +196,8 @@ export function lobbyView(ctx: RoomCtx): SubView {
       }
       actions.append(h('p', { class: 'auto-hint' }, h('span', { html: icons.users }), 'The game starts automatically when 3 players have joined.'));
     },
-    destroy() {},
+    destroy() {
+      stopCountdown();
+    },
   };
 }

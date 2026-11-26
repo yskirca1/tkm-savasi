@@ -3,6 +3,9 @@ import {
   BOT_NAME,
   BOT_THINK_MS,
   PICK_TIME_MS,
+  PRACTICE_ROUNDS,
+  QUICK_MATCH_BOT_WAIT_MS,
+  QUICK_MATCH_ROUNDS,
   RECONNECT_GRACE_MS,
   ROUND_END_DELAY_MS,
   ROUND_INTRO_MS,
@@ -515,5 +518,330 @@ describe('match end, stats, rematch, rename', () => {
     const st = env.transport.last('room:state')!;
     expect(st.code).toBe(code);
     expect(st.seats[0].username).toBe('YeniAd');
+  });
+});
+
+describe('quick match', () => {
+  function quick(env: Env, user: (typeof USERS)[keyof typeof USERS]): Room {
+    const res = env.mgr.quickMatch(user);
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error(res.error);
+    return env.mgr.getRoom(res.code)!;
+  }
+
+  function finishMatch(env: Env, room: Room): void {
+    for (let r = 1; r <= room.totalRounds; r++) {
+      toPlaying(env, room);
+      finishRoundSole(env, room, 'rock');
+      env.sched.advance(ROUND_END_DELAY_MS + 1);
+    }
+    expect(room.phase).toBe('matchEnd');
+  }
+
+  it('creates a quick room with fixed rounds; normal rooms send quick: null', () => {
+    const env = setup();
+    const room = quick(env, USERS.a);
+    expect(room.quick).toBe(true);
+    expect(room.totalRounds).toBe(QUICK_MATCH_ROUNDS);
+    expect(room.hostUserId).toBe(USERS.a.userId);
+    expect(env.transport.last('room:state')!.quick).toEqual({ autoStartInMs: null });
+    expect(room.setRounds(USERS.a.userId, 3)).toBe(MSG.quickRoundsFixed);
+    expect(room.totalRounds).toBe(QUICK_MATCH_ROUNDS);
+
+    const { code } = env.mgr.createRoom(USERS.d);
+    expect(env.transport.last('room:state')!.code).toBe(code);
+    expect(env.transport.last('room:state')!.quick).toBeNull();
+  });
+
+  it('two quick players land in the same room', () => {
+    const env = setup();
+    const r1 = quick(env, USERS.a);
+    const r2 = quick(env, USERS.b);
+    expect(r2.code).toBe(r1.code);
+    expect(r1.humanCount()).toBe(2);
+    expect(env.mgr.rooms.size).toBe(1);
+    // calling again while waiting in the quick lobby returns the same room
+    expect(quick(env, USERS.b).code).toBe(r1.code);
+    expect(r1.humanCount()).toBe(2);
+  });
+
+  it('a third quick player triggers the auto-start', () => {
+    const env = setup();
+    const room = quick(env, USERS.a);
+    quick(env, USERS.b);
+    quick(env, USERS.c);
+    expect(room.phase).toBe('picking');
+    expect(room.seats.every((s) => s.kind === 'human')).toBe(true);
+    expect(room.toState().quick).toEqual({ autoStartInMs: null });
+  });
+
+  it('with 2 humans a bot joins and the match starts at exactly QUICK_MATCH_BOT_WAIT_MS', () => {
+    const env = setup();
+    const room = quick(env, USERS.a);
+    quick(env, USERS.b);
+    expect(env.transport.last('room:state')!.quick).toEqual({ autoStartInMs: QUICK_MATCH_BOT_WAIT_MS });
+    env.sched.advance(QUICK_MATCH_BOT_WAIT_MS - 1);
+    expect(room.phase).toBe('lobby');
+    expect(room.seats.some((s) => s.kind === 'bot')).toBe(false);
+    env.sched.advance(1);
+    expect(room.phase).toBe('picking');
+    const bot = room.seats.find((s) => s.kind === 'bot')!;
+    expect(bot.username).toBe(BOT_NAME);
+    expect(bot.replacedHuman).toBe(false);
+    expect(room.totalRounds).toBe(QUICK_MATCH_ROUNDS);
+  });
+
+  it('timer is cancelled when one leaves; a lone player never starts; a new pair restarts it', () => {
+    const env = setup();
+    const room = quick(env, USERS.a);
+    quick(env, USERS.b);
+    env.sched.advance(15_000);
+    env.mgr.leave(USERS.b.userId);
+    expect(env.transport.last('room:state')!.quick).toEqual({ autoStartInMs: null });
+    env.sched.advance(QUICK_MATCH_BOT_WAIT_MS * 3);
+    expect(room.phase).toBe('lobby');
+    expect(room.humanCount()).toBe(1);
+    expect(env.sched.pending).toBe(0);
+    // a new pair gets a full fresh wait
+    expect(quick(env, USERS.c).code).toBe(room.code);
+    expect(env.transport.last('room:state')!.quick).toEqual({ autoStartInMs: QUICK_MATCH_BOT_WAIT_MS });
+    env.sched.advance(QUICK_MATCH_BOT_WAIT_MS - 1);
+    expect(room.phase).toBe('lobby');
+    env.sched.advance(1);
+    expect(room.phase).toBe('picking');
+  });
+
+  it('a disconnected human counts until the lobby grace removes them, then the timer re-evaluates', () => {
+    const env = setup();
+    const room = quick(env, USERS.a);
+    quick(env, USERS.b);
+    env.sched.advance(1_000);
+    env.mgr.handleDisconnect(USERS.b.userId);
+    // still 2 humans during the grace: the timer keeps running (not restarted)
+    expect(env.transport.last('room:state')!.quick).toEqual({ autoStartInMs: QUICK_MATCH_BOT_WAIT_MS - 1_000 });
+    env.sched.advance(LOBBY_DISCONNECT_GRACE_MS);
+    expect(room.humanCount()).toBe(1);
+    expect(env.transport.last('room:state')!.quick).toEqual({ autoStartInMs: null });
+    env.sched.advance(QUICK_MATCH_BOT_WAIT_MS);
+    expect(room.phase).toBe('lobby');
+
+    // reconnecting within the grace keeps the same timer running to the original deadline
+    const env2 = setup();
+    const room2 = quick(env2, USERS.a);
+    quick(env2, USERS.b);
+    env2.mgr.handleDisconnect(USERS.b.userId);
+    env2.sched.advance(2_000);
+    env2.mgr.handleConnect(USERS.b.userId);
+    expect(env2.transport.last('room:state')!.quick).toEqual({ autoStartInMs: QUICK_MATCH_BOT_WAIT_MS - 2_000 });
+    env2.sched.advance(QUICK_MATCH_BOT_WAIT_MS - 2_000);
+    expect(room2.phase).toBe('picking');
+  });
+
+  it('a full / in-progress quick room is not matched: a new room is created', () => {
+    const env = setup();
+    const room = quick(env, USERS.a);
+    quick(env, USERS.b);
+    quick(env, USERS.c);
+    expect(room.phase).toBe('picking');
+    const other = quick(env, USERS.d);
+    expect(other.code).not.toBe(room.code);
+    expect(other.quick).toBe(true);
+    expect(other.humanCount()).toBe(1);
+    expect(env.mgr.rooms.size).toBe(2);
+  });
+
+  it('a seated player calling quick match during their match gets the same room back', () => {
+    const env = setup();
+    const room = quick(env, USERS.a);
+    quick(env, USERS.b);
+    quick(env, USERS.c);
+    expect(quick(env, USERS.a).code).toBe(room.code);
+    expect(room.hasUser(USERS.a.userId)).toBe(true);
+    expect(env.mgr.rooms.size).toBe(1);
+  });
+
+  it('private rooms are never matched; leaving a private lobby for quick match', () => {
+    const env = setup();
+    const { code } = env.mgr.createRoom(USERS.a);
+    const priv = env.mgr.getRoom(code)!;
+    const q = quick(env, USERS.b);
+    expect(q.code).not.toBe(code);
+    expect(priv.humanCount()).toBe(1);
+    // a user in a private lobby who uses quick match leaves it first (here: room deleted)
+    const q2 = quick(env, USERS.a);
+    expect(q2.code).toBe(q.code);
+    expect(env.mgr.getRoom(code)).toBeUndefined();
+  });
+
+  it('matches the oldest open quick lobby first; quick rooms are joinable by code', () => {
+    const env = setup();
+    const r1 = quick(env, USERS.a);
+    // force a second quick room: d joins r1's code later
+    env.mgr.createRoom(USERS.b, undefined, { quick: true });
+    const r2 = env.mgr.roomOf(USERS.b.userId)!;
+    expect(r2.code).not.toBe(r1.code);
+    expect(quick(env, USERS.c).code).toBe(r1.code);
+    expect(env.mgr.joinRoom(USERS.d, r2.code).ok).toBe(true);
+    expect(r2.humanCount()).toBe(2);
+  });
+
+  it('autoStartInMs decreases across re-broadcasts', () => {
+    const env = setup();
+    const room = quick(env, USERS.a);
+    quick(env, USERS.b);
+    const first = env.transport.last('room:state')!.quick!.autoStartInMs!;
+    env.sched.advance(5_000);
+    env.mgr.renameUser(USERS.a.userId, 'Ayse2');
+    const second = env.transport.last('room:state')!.quick!.autoStartInMs!;
+    env.sched.advance(7_000);
+    env.mgr.sync(USERS.b.userId);
+    const third = env.transport.last('room:state')!.quick!.autoStartInMs!;
+    expect(first).toBe(QUICK_MATCH_BOT_WAIT_MS);
+    expect(second).toBe(QUICK_MATCH_BOT_WAIT_MS - 5_000);
+    expect(third).toBe(QUICK_MATCH_BOT_WAIT_MS - 12_000);
+    expect(room.phase).toBe('lobby');
+  });
+
+  it('host may still start with the computer early', () => {
+    const env = setup();
+    const room = quick(env, USERS.a);
+    quick(env, USERS.b);
+    expect(room.startWithBot(USERS.a.userId)).toBeUndefined();
+    expect(room.phase).toBe('picking');
+    expect(room.seats.filter((s) => s.kind === 'bot')).toHaveLength(1);
+    expect(room.toState().quick).toEqual({ autoStartInMs: null });
+  });
+
+  it('rematch reopens matchmaking and re-arms the timer', () => {
+    const env = setup();
+    const room = quick(env, USERS.a);
+    quick(env, USERS.b);
+    env.sched.advance(QUICK_MATCH_BOT_WAIT_MS);
+    expect(room.phase).toBe('picking');
+    expect(quick(env, USERS.c).code).not.toBe(room.code); // in progress: not matched
+    env.mgr.leave(USERS.c.userId);
+    finishMatch(env, room);
+    expect(room.openForQuickMatch).toBe(false);
+    expect(room.rematch(USERS.a.userId)).toBeUndefined();
+    expect(room.phase).toBe('lobby');
+    expect(room.quick).toBe(true);
+    expect(room.totalRounds).toBe(QUICK_MATCH_ROUNDS);
+    expect(room.seats.some((s) => s.kind === 'bot')).toBe(false);
+    expect(env.transport.last('room:state')!.quick).toEqual({ autoStartInMs: QUICK_MATCH_BOT_WAIT_MS });
+    expect(room.openForQuickMatch).toBe(true);
+    // a quick player is matched into the rematch lobby → 3 humans → auto-start
+    expect(quick(env, USERS.d).code).toBe(room.code);
+    expect(room.phase).toBe('picking');
+    expect(room.seats.every((s) => s.kind === 'human')).toBe(true);
+  });
+
+  it('rematch with a lone human: no timer, never starts', () => {
+    const env = setup();
+    const room = quick(env, USERS.a);
+    quick(env, USERS.b);
+    env.sched.advance(QUICK_MATCH_BOT_WAIT_MS);
+    finishMatch(env, room);
+    env.mgr.leave(USERS.b.userId);
+    expect(room.rematch(USERS.a.userId)).toBeUndefined();
+    expect(env.transport.last('room:state')!.quick).toEqual({ autoStartInMs: null });
+    env.sched.advance(QUICK_MATCH_BOT_WAIT_MS * 2);
+    expect(room.phase).toBe('lobby');
+  });
+});
+
+describe('practice', () => {
+  function playOut(env: Env, room: Room): void {
+    for (let r = 1; r <= room.totalRounds; r++) {
+      toPlaying(env, room);
+      finishRoundSole(env, room, 'rock');
+      env.sched.advance(ROUND_END_DELAY_MS + 1);
+    }
+    expect(room.phase).toBe('matchEnd');
+  }
+
+  it('room:practice starts in picking with the user as host and 2 bots', () => {
+    const env = setup();
+    const { code } = env.mgr.practice(USERS.a);
+    const room = env.mgr.getRoom(code)!;
+    expect(room.practice).toBe(true);
+    expect(room.phase).toBe('picking');
+    expect(room.totalRounds).toBe(PRACTICE_ROUNDS);
+    expect(room.seats[0]).toMatchObject({ kind: 'human', userId: USERS.a.userId });
+    expect(room.seats.filter((s) => s.kind === 'bot')).toHaveLength(2);
+    expect(room.hostUserId).toBe(USERS.a.userId);
+    const st = env.transport.last('room:state')!;
+    expect(st.practice).toBe(true);
+    expect(st.quick).toBeNull();
+    // no lobby broadcast for practice rooms
+    expect(env.transport.of('room:state').some((x) => x.phase === 'lobby')).toBe(false);
+  });
+
+  it('normal and quick rooms send practice: false', () => {
+    const env = setup();
+    env.mgr.createRoom(USERS.a);
+    expect(env.transport.last('room:state')!.practice).toBe(false);
+    env.mgr.quickMatch(USERS.b);
+    expect(env.transport.last('room:state')!.practice).toBe(false);
+  });
+
+  it('another user cannot join a practice room by code; quick match never matches it', () => {
+    const env = setup();
+    const { code } = env.mgr.practice(USERS.a);
+    expect(env.mgr.joinRoom(USERS.b, code)).toEqual({ ok: false, error: MSG.practiceRoom });
+    const q = env.mgr.quickMatch(USERS.c);
+    expect(q.ok && q.code).not.toBe(code);
+    expect(env.mgr.getRoom(code)!.humanCount()).toBe(1);
+  });
+
+  it('practice matches are never saved; a normal match still saves', () => {
+    const env = setup();
+    const { code } = env.mgr.practice(USERS.a);
+    const room = env.mgr.getRoom(code)!;
+    playOut(env, room);
+    expect(env.transport.last('match:end')).toBeDefined();
+    expect(env.saved).toHaveLength(0);
+
+    const env2 = setup();
+    const normal = twoHumansAndBot(env2);
+    normal.totalRounds = 3;
+    playOut(env2, normal);
+    expect(env2.saved).toHaveLength(1);
+  });
+
+  it('rematch restarts a practice match immediately with two fresh bots', () => {
+    const env = setup();
+    const { code } = env.mgr.practice(USERS.a);
+    const room = env.mgr.getRoom(code)!;
+    playOut(env, room);
+    expect(room.rematch(USERS.a.userId)).toBeUndefined();
+    expect(room.phase).toBe('picking');
+    expect(room.round).toBe(1);
+    expect(room.scores).toEqual([0, 0, 0]);
+    expect(room.seats.filter((s) => s.kind === 'bot')).toHaveLength(2);
+    expect(env.saved).toHaveLength(0);
+  });
+
+  it('human disconnect timeout deletes the room (no bot takeover)', () => {
+    const env = setup();
+    const { code } = env.mgr.practice(USERS.a);
+    const room = env.mgr.getRoom(code)!;
+    env.mgr.handleDisconnect(USERS.a.userId);
+    expect(room.paused).not.toBeNull();
+    env.sched.advance(RECONNECT_GRACE_MS + 10);
+    expect(room.destroyed).toBe(true);
+    expect(env.mgr.getRoom(code)).toBeUndefined();
+    expect(env.mgr.roomOf(USERS.a.userId)).toBeUndefined();
+    expect(env.sched.pending).toBe(0);
+    expect(env.saved).toHaveLength(0);
+  });
+
+  it('room:practice leaves the current room; quick match from a practice match leaves it too', () => {
+    const env = setup();
+    const { code: normal } = env.mgr.createRoom(USERS.a);
+    const { code } = env.mgr.practice(USERS.a);
+    expect(env.mgr.getRoom(normal)).toBeUndefined();
+    const q = env.mgr.quickMatch(USERS.a);
+    expect(q.ok && q.code).not.toBe(code);
+    expect(env.mgr.getRoom(code)).toBeUndefined();
   });
 });

@@ -3,6 +3,7 @@ import { avatar, h } from '../dom';
 import { icons } from '../icons';
 import { send, state, type NetState } from '../net';
 import { settingsButton } from '../settings';
+import { practiceBadge } from './common';
 import type { RoomCtx, SubView } from './room';
 import { mySeat, seatName } from './room';
 
@@ -10,7 +11,9 @@ const RING_R = 26;
 const RING_C = 2 * Math.PI * RING_R;
 
 export function pickingView(ctx: RoomCtx): SubView {
-  const roundLabel = h('span', { class: 'topbar-title' });
+  const practiceTag = practiceBadge();
+  const roundText = h('span');
+  const roundLabel = h('span', { class: 'topbar-title' }, roundText, practiceTag);
   const chips = h('ol', { class: 'order-chips', 'aria-label': 'Pick order for this round' });
   const turnText = h('h1', { class: 'turn-text' });
   const turnSub = h('p', { class: 'turn-sub', 'aria-live': 'polite' });
@@ -81,7 +84,8 @@ export function pickingView(ctx: RoomCtx): SubView {
     update(s: NetState) {
       const room = s.room!;
       const p = s.pick && s.pick.round === room.round ? s.pick : null;
-      roundLabel.textContent = `Round ${room.round}/${room.totalRounds}`;
+      roundText.textContent = `Round ${room.round}/${room.totalRounds}`;
+      practiceTag.hidden = !room.practice;
       const me = mySeat(room, ctx.userId);
       const picks = p?.picks ?? room.picks;
       const current = p?.currentSeat ?? null;

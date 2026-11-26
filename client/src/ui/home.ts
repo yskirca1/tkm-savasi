@@ -1,4 +1,4 @@
-import { SPECIES_EMOJI } from '@tkm/shared';
+import { QUICK_MATCH_ROUNDS, SPECIES_EMOJI } from '@tkm/shared';
 import { loadMe } from '../auth';
 import { h } from '../dom';
 import { icons } from '../icons';
@@ -20,6 +20,23 @@ export const homeView: View = async (root) => {
   const me = await loadMe().catch(() => null);
   const name = me?.profile?.username ?? '';
 
+  const quickHintId = nextId('quick');
+  const quick = btn('Quick match', { icon: icons.bolt, block: true, variant: 'accent btn-lg btn-quick' });
+  quick.setAttribute('aria-describedby', quickHintId);
+  quick.addEventListener('click', () =>
+    busy(quick, async () => {
+      const res = await send.quickMatch();
+      if (!res.ok) return void toast(res.error, 'error');
+      navigate(`/r/${res.code}`);
+    }),
+  );
+  const quickBlock = h(
+    'div',
+    { class: 'quick-block' },
+    quick,
+    h('p', { class: 'hint', id: quickHintId }, `Play with whoever is online · ${QUICK_MATCH_ROUNDS} rounds. If nobody else shows up, the computer fills the last seat.`),
+  );
+
   const create = btn('Create room', { icon: icons.plus, block: true, variant: 'primary btn-lg' });
   create.addEventListener('click', () =>
     busy(create, async () => {
@@ -27,6 +44,23 @@ export const homeView: View = async (root) => {
       if (!res.ok) return void toast(res.error, 'error');
       navigate(`/r/${res.code}`);
     }),
+  );
+
+  const practiceHintId = nextId('practice');
+  const practice = btn('Practice vs computer', { icon: icons.bot, block: true, variant: 'ghost' });
+  practice.setAttribute('aria-describedby', practiceHintId);
+  practice.addEventListener('click', () =>
+    busy(practice, async () => {
+      const res = await send.practice();
+      if (!res.ok) return void toast(res.error, 'error');
+      navigate(`/r/${res.code}`);
+    }),
+  );
+  const practiceBlock = h(
+    'div',
+    { class: 'practice-block' },
+    practice,
+    h('p', { class: 'hint', id: practiceHintId }, "Doesn't count toward your stats"),
   );
 
   const codeId = nextId('code');
@@ -94,10 +128,20 @@ export const homeView: View = async (root) => {
           { class: 'hero' },
           h('div', { class: 'hero-emoji', 'aria-hidden': 'true' }, h('span', { class: 'sp sp-rock' }, SPECIES_EMOJI.rock), h('span', { class: 'sp sp-paper' }, SPECIES_EMOJI.paper), h('span', { class: 'sp sp-scissors' }, SPECIES_EMOJI.scissors)),
           h('h1', null, name ? `Hi, ${name}!` : 'Hi there!'),
-          h('p', { class: 'muted' }, 'Create a room, invite your friends, and pick your species. The last one standing wins the round!'),
+          h('p', { class: 'muted' }, 'Jump into a quick match or invite your friends, then pick your species. The last one standing wins the round!'),
         ),
         resume,
-        h('section', { class: 'card home-card stack' }, create, h('div', { class: 'divider' }, h('span', null, 'or')), joinForm),
+        h(
+          'section',
+          { class: 'card home-card stack' },
+          quickBlock,
+          h('div', { class: 'divider' }, h('span', null, 'or play with friends')),
+          create,
+          h('div', { class: 'divider' }, h('span', null, 'or')),
+          joinForm,
+          h('div', { class: 'divider' }, h('span', null, 'or warm up solo')),
+          practiceBlock,
+        ),
         h(
           'section',
           { class: 'card rules' },

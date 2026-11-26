@@ -1,4 +1,4 @@
-import { DEFAULT_ROUNDS, ROUND_OPTIONS, type RoundOption } from '@tkm/shared';
+import { DEFAULT_ROUNDS, PRACTICE_ROUNDS, QUICK_MATCH_ROUNDS, ROUND_OPTIONS, type RoundOption } from '@tkm/shared';
 import type { SimApi } from '../sim/api.js';
 import type { MatchRecord } from '../db/types.js';
 import { MSG } from '../errors.js';
@@ -54,7 +54,7 @@ export class RoomManager {
     return code ? this.rooms.get(code) : undefined;
   }
 
-  private makeRoom(code: string, host: RoomUser, totalRounds: RoundOption): Room {
+  private makeRoom(code: string, host: RoomUser, totalRounds: RoundOption, opts: { quick?: boolean; practice?: boolean } = {}): Room {
     const { transport } = this.deps;
     const room: Room = new Room(code, host, totalRounds, {
       sim: this.deps.sim,
@@ -76,15 +76,20 @@ export class RoomManager {
         if (this.rooms.get(code) === room) this.rooms.delete(code);
         for (const [uid, c] of this.userRoom) if (c === code) this.userRoom.delete(uid);
       },
-    });
+    }, opts);
     return room;
   }
 
-  createRoom(user: RoomUser, totalRounds?: RoundOption): { code: string } {
+  createRoom(user: RoomUser, totalRounds?: RoundOption, opts: { quick?: boolean } = {}): { code: string } {
     this.leave(user.userId);
-    const rounds = totalRounds && (ROUND_OPTIONS as readonly number[]).includes(totalRounds) ? totalRounds : DEFAULT_ROUNDS;
+    const quick = opts.quick === true;
+    const rounds = quick
+      ? QUICK_MATCH_ROUNDS
+      : totalRounds && (ROUND_OPTIONS as readonly number[]).includes(totalRounds)
+        ? totalRounds
+        : DEFAULT_ROUNDS;
     const code = this.newCode();
-    const room = this.makeRoom(code, user, rounds);
+    const room = this.makeRoom(code, user, rounds, { quick });
     this.rooms.set(code, room);
     this.userRoom.set(user.userId, code);
     this.deps.transport.joinChannel(user.userId, code);
@@ -105,6 +110,7 @@ export class RoomManager {
       this.sync(user.userId);
       return { ok: true, code };
     }
+    if (room.practice) return { ok: false, error: MSG.practiceRoom };
     if (room.phase !== 'lobby') return { ok: false, error: MSG.gameStarted };
     if (room.humanCount() + room.seats.filter((s) => s.kind === 'bot').length >= 3) return { ok: false, error: MSG.roomFull };
 
@@ -118,6 +124,38 @@ export class RoomManager {
       return { ok: false, error: err };
     }
     return { ok: true, code };
+  }
+
+  /**
+   * room:quick — matchmaking. A user already seated in a running match (or already waiting in a quick
+   * lobby) gets that room back; otherwise they leave their current room and are seated in the oldest
+   * open quick lobby, or a new quick room is created with them as host.
+   */
+  quickMatch(user: RoomUser): { ok: true; code: string } | { ok: false; error: string } {
+    const current = this.roomOf(user.userId);
+    if (current && !current.destroyed && !current.practice && current.hasUser(user.userId) && (current.inMatch || (current.quick && current.phase === 'lobby'))) {
+      return this.joinRoom(user, current.code); // reconnect path: re-attach + sync
+    }
+    this.leave(user.userId);
+    for (const room of this.rooms.values()) {
+      // Map iteration order = creation order, so the first match is the oldest open quick lobby.
+      if (!room.openForQuickMatch) continue;
+      const res = this.joinRoom(user, room.code);
+      if (res.ok) return res;
+    }
+    return { ok: true, ...this.createRoom(user, undefined, { quick: true }) };
+  }
+
+  /** room:practice — leave any current room, create a practice room (1 human + 2 bots) and start at once. */
+  practice(user: RoomUser): { code: string } {
+    this.leave(user.userId);
+    const code = this.newCode();
+    const room = this.makeRoom(code, user, PRACTICE_ROUNDS, { practice: true });
+    this.rooms.set(code, room);
+    this.userRoom.set(user.userId, code);
+    this.deps.transport.joinChannel(user.userId, code);
+    room.startPractice();
+    return { code };
   }
 
   leave(userId: string): void {

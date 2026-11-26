@@ -58,7 +58,10 @@ export const roomView: View = async (root, params) => {
     leave: () => {
       const r = state.room;
       const inMatch = r && r.phase !== 'lobby' && r.phase !== 'matchEnd';
-      if (inMatch && !confirm('If you leave the match, the computer will play in your place. Do you want to leave?')) return;
+      const question = r?.practice
+        ? 'Leave this practice match? It will end.'
+        : 'If you leave the match, the computer will play in your place. Do you want to leave?';
+      if (inMatch && !confirm(question)) return;
       left = true;
       send.leaveRoom();
       navigate('/');

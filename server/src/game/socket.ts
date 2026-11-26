@@ -111,6 +111,25 @@ export function registerSocketHandlers(io: GameServer, deps: { auth: AuthProvide
       }),
     );
 
+    socket.on(
+      'room:quick',
+      safe(async (_p, ack) => {
+        const user = await currentUser();
+        const res = rooms.quickMatch(user);
+        if (typeof ack === 'function') ack(res);
+        else if (!res.ok) fail(res.error);
+      }),
+    );
+
+    socket.on(
+      'room:practice',
+      safe(async (_p, ack) => {
+        const user = await currentUser();
+        const { code } = rooms.practice(user);
+        if (typeof ack === 'function') ack({ ok: true, code });
+      }),
+    );
+
     socket.on('room:leave', safe(() => rooms.leave(userId)));
 
     socket.on(

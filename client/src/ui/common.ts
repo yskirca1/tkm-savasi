@@ -199,6 +199,11 @@ export function formAlert(): { el: HTMLElement; set: (m: string | null, kind?: '
   };
 }
 
+/** Small "Practice" badge (practice rooms: HUD, picking, match end). */
+export function practiceBadge(): HTMLElement {
+  return h('span', { class: 'tag tag-practice', hidden: true }, h('span', { html: icons.bot }), 'Practice');
+}
+
 export function btn(label: string, opts: { icon?: string; variant?: string; type?: 'button' | 'submit'; onclick?: (e: Event) => void; block?: boolean } = {}): HTMLButtonElement {
   const b = h('button', {
     type: opts.type ?? 'button',

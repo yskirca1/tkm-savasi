@@ -7,12 +7,14 @@ import { GameRenderer } from '../game/renderer';
 import { icons } from '../icons';
 import { netEvents, send, state, type NetState } from '../net';
 import { onReducedMotionChange, reducedMotion, settingsButton } from '../settings';
+import { practiceBadge } from './common';
 import type { RoomCtx, SubView } from './room';
 import { mySeat, seatName } from './room';
 
 export function gameView(ctx: RoomCtx): SubView {
   // ---------- DOM ----------
   const roundEl = h('span', { class: 'hud-round' });
+  const practiceTag = practiceBadge();
   const timeEl = h('span', { class: 'hud-time', 'aria-label': 'Elapsed time' }, '00:00');
   const speedEl = h('span', { class: 'speed-chip', 'aria-live': 'polite' }, '1x');
   const scoreboard = h('ol', { class: 'scoreboard', 'aria-label': 'Scoreboard' });
@@ -34,7 +36,7 @@ export function gameView(ctx: RoomCtx): SubView {
       { class: 'hud' },
       h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Leave match', title: 'Leave match', html: icons.back, onclick: () => ctx.leave() }),
       h('h1', { class: 'visually-hidden' }, 'Game'),
-      h('div', { class: 'hud-center' }, roundEl, h('span', { class: 'hud-clock' }, h('span', { html: icons.clock }), timeEl), speedEl),
+      h('div', { class: 'hud-center' }, practiceTag, roundEl, h('span', { class: 'hud-clock' }, h('span', { html: icons.clock }), timeEl), speedEl),
       settingsButton(),
     ),
     scoreboard,
@@ -315,6 +317,7 @@ export function gameView(ctx: RoomCtx): SubView {
       if (prevPhase === 'intro' && room.phase === 'playing') goUntil = performance.now() + 700;
       applyRoundStart();
       roundEl.textContent = `Round ${room.round}/${room.totalRounds}`;
+      practiceTag.hidden = !room.practice;
       buildScoreboard();
       renderVote(s.snapshot);
       applyFever(lastSpeed);

@@ -5,6 +5,7 @@ import {
   BOT_NAME,
   BOT_THINK_MS,
   PICK_TIME_MS,
+  QUICK_MATCH_BOT_WAIT_MS,
   RECONNECT_GRACE_MS,
   ROUND_END_DELAY_MS,
   ROUND_INTRO_MS,
@@ -111,6 +112,10 @@ function botSeat(replacedHuman: boolean): Seat {
 
 export class Room {
   readonly code: string;
+  /** Matchmaking ("Quick match") room: open to room:quick while in lobby, auto-starts with a bot. */
+  readonly quick: boolean;
+  /** Solo practice room: 1 human + 2 bots, starts immediately, never saves stats, not joinable. */
+  readonly practice: boolean;
   hostUserId: string;
   totalRounds: RoundOption;
   phase: RoomPhase = 'lobby';
@@ -127,6 +132,8 @@ export class Room {
   private graceTimer: TimerHandle | null = null;
   private lobbyGrace = new Map<string, TimerHandle>();
   private loop: TimerHandle | null = null;
+  /** Quick match: lobby auto-start timer while exactly 2 humans wait (key = the pair's user ids). */
+  private quickTimer: { handle: TimerHandle; fireAt: number; key: string } | null = null;
 
   private simState: SimState | null = null;
   private seatSpecies: [Species, Species, Species] | null = null;
@@ -146,7 +153,10 @@ export class Room {
     host: RoomUser,
     totalRounds: RoundOption,
     private deps: RoomDeps,
+    opts: { quick?: boolean; practice?: boolean } = {},
   ) {
+    this.quick = opts.quick === true && opts.practice !== true;
+    this.practice = opts.practice === true;
     this.code = code;
     this.hostUserId = host.userId;
     this.totalRounds = totalRounds;
@@ -180,6 +190,15 @@ export class Room {
     return this.seats.filter((s) => s.kind === 'human').length;
   }
 
+  hasEmptySeat(): boolean {
+    return this.seats.some((s) => s.kind === 'empty');
+  }
+
+  /** Open to matchmaking: a quick room in lobby with a free seat. */
+  get openForQuickMatch(): boolean {
+    return this.quick && !this.destroyed && this.phase === 'lobby' && this.hasEmptySeat();
+  }
+
   get inMatch(): boolean {
     return IN_MATCH.has(this.phase);
   }
@@ -211,6 +230,8 @@ export class Room {
       seats,
       scores: [...this.scores],
       picks: [...this.picks],
+      practice: this.practice,
+      quick: this.quick ? { autoStartInMs: this.quickTimer ? Math.max(0, Math.round(this.quickTimer.fireAt - this.s.now())) : null } : null,
       paused: this.paused ? { waitingFor: [...this.paused.waitingFor], resumeDeadline: this.paused.resumeDeadline } : null,
     };
   }
@@ -258,7 +279,48 @@ export class Room {
   }
 
   emitState(): void {
+    // Every broadcast follows a state change: re-evaluate the quick-match timer first so the
+    // payload carries the up-to-date autoStartInMs.
+    this.syncQuickTimer();
     this.emit('room:state', this.toState());
+  }
+
+  // ------------------------------------------------------------------ quick match auto-start
+
+  /**
+   * Quick rooms in lobby with exactly 2 humans run a QUICK_MATCH_BOT_WAIT_MS timer (restarted when the
+   * pair changes); any other situation cancels it. A disconnected human still counts until removed.
+   */
+  private syncQuickTimer(): void {
+    if (!this.quick || this.destroyed || this.phase !== 'lobby' || this.humanCount() !== 2 || !this.hasEmptySeat()) {
+      this.cancelQuickTimer();
+      return;
+    }
+    const key = this.seats
+      .filter((s) => s.kind === 'human')
+      .map((s) => s.userId)
+      .sort()
+      .join('|');
+    if (this.quickTimer?.key === key) return;
+    this.cancelQuickTimer();
+    const handle = this.s.setTimeout(() => this.onQuickTimer(handle), QUICK_MATCH_BOT_WAIT_MS);
+    this.quickTimer = { handle, fireAt: this.s.now() + QUICK_MATCH_BOT_WAIT_MS, key };
+  }
+
+  private cancelQuickTimer(): void {
+    if (this.quickTimer) this.s.clearTimeout(this.quickTimer.handle);
+    this.quickTimer = null;
+  }
+
+  private onQuickTimer(handle: TimerHandle): void {
+    if (this.quickTimer?.handle !== handle) return;
+    this.quickTimer = null;
+    if (this.destroyed || this.phase !== 'lobby' || this.humanCount() !== 2) return;
+    const free = this.seats.findIndex((s) => s.kind === 'empty');
+    if (free === -1) return;
+    this.log('quick match: no third player — starting with a bot');
+    this.seats[free] = botSeat(false);
+    this.startMatch();
   }
 
   private emitPick(): void {
@@ -325,6 +387,7 @@ export class Room {
   }
 
   setRounds(userId: string, n: number): ActionResult {
+    if (this.quick) return MSG.quickRoundsFixed;
     if (userId !== this.hostUserId) return MSG.hostOnly;
     if (this.phase !== 'lobby') return MSG.gameStarted;
     if (!(ROUND_OPTIONS as readonly number[]).includes(n)) return MSG.invalidRounds;
@@ -344,6 +407,13 @@ export class Room {
     return undefined;
   }
 
+  /** Practice: fill every empty seat with a bot and start right away (creation and rematch). */
+  startPractice(): void {
+    if (!this.practice || this.destroyed || this.inMatch) return;
+    for (const i of SEAT_IDX) if (this.seats[i].kind === 'empty') this.seats[i] = botSeat(false);
+    this.startMatch();
+  }
+
   rematch(userId: string): ActionResult {
     if (this.phase !== 'matchEnd') return undefined;
     if (!this.hasUser(userId)) return MSG.notInRoom;
@@ -355,6 +425,10 @@ export class Room {
     if (this.destroyed) return undefined;
     this.resetMatchState();
     this.phase = 'lobby';
+    if (this.practice) {
+      this.startPractice(); // straight into a new practice match (no lobby broadcast)
+      return undefined;
+    }
     this.emitState();
     if (this.humanCount() === 3) this.startMatch();
     return undefined;
@@ -471,6 +545,14 @@ export class Room {
     const seat = this.seats[i];
     const uid = seat.userId;
     if (seat.kind !== 'human' || !uid) return;
+    if (this.practice) {
+      // Practice: no bot takeover — the room simply closes.
+      this.log(`${seat.username} left practice — closing`);
+      this.seats[i] = emptySeat();
+      this.deps.onUserRemoved(uid);
+      this.ensureHost();
+      return;
+    }
     this.log(`${seat.username} replaced by bot (seat ${i})`);
     const p = this.participants.get(uid);
     if (p) p.finishedInSeat = false;
@@ -542,6 +624,7 @@ export class Room {
   // ------------------------------------------------------------------ match flow
 
   private startMatch(): void {
+    this.cancelQuickTimer();
     this.resetMatchState();
     this.startedAt = this.s.now();
     for (const i of SEAT_IDX) {
@@ -795,7 +878,7 @@ export class Room {
     this.log(`match end: scores ${this.scores.join('-')} winners [${winners.join(',')}]`);
     this.emit('match:end', this.lastMatchEnd);
     this.emitState();
-    if (results.length > 0) {
+    if (results.length > 0 && !this.practice) {
       try {
         this.deps.onMatchEnd({ roomCode: this.code, totalRounds: this.totalRounds, startedAt: this.startedAt, results });
       } catch (err) {
@@ -826,6 +909,7 @@ export class Room {
     if (this.destroyed) return;
     this.clearTimer();
     this.stopLoop();
+    this.cancelQuickTimer();
     this.s.clearTimeout(this.graceTimer);
     this.graceTimer = null;
     for (const h of this.lobbyGrace.values()) this.s.clearTimeout(h);

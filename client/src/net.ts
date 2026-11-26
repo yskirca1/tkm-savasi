@@ -21,6 +21,8 @@ export type ConnStatus = 'idle' | 'connecting' | 'connected' | 'disconnected';
 export interface NetState {
   status: ConnStatus;
   room: RoomState | null;
+  /** performance.now() when the latest room:state arrived (for the quick-match local countdown). */
+  roomAt: number;
   pick: PickState | null;
   /** performance.now() when pick arrived (for local countdown). */
   pickAt: number;
@@ -49,6 +51,7 @@ type Events = {
 export const state: NetState = {
   status: 'idle',
   room: null,
+  roomAt: 0,
   pick: null,
   pickAt: 0,
   roundStart: null,
@@ -142,6 +145,7 @@ export function connect(): void {
   socket.on('room:state', (s) => {
     const prevPhase = state.room?.phase;
     state.room = s;
+    state.roomAt = performance.now();
     if (s.phase === 'lobby') {
       state.pick = null;
       state.roundStart = null;
@@ -219,6 +223,8 @@ function withAck<T>(fn: (s: NonNullable<typeof socket>, cb: (err: Error | null, 
 export const send = {
   createRoom: (totalRounds?: RoundOption) =>
     withAck<{ code: string }>((s, cb) => s.timeout(8000).emit('room:create', { totalRounds }, cb)),
+  practice: () => withAck<{ code: string }>((s, cb) => s.timeout(8000).emit('room:practice', {}, cb)),
+  quickMatch: () => withAck<{ code: string }>((s, cb) => s.timeout(8000).emit('room:quick', {}, cb)),
   joinRoom: (code: string) => withAck<{ code: string }>((s, cb) => s.timeout(8000).emit('room:join', { code }, cb)),
   leaveRoom: () => {
     socket?.emit('room:leave');

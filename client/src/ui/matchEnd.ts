@@ -3,7 +3,7 @@ import { avatar, h } from '../dom';
 import { icons } from '../icons';
 import { send, type NetState } from '../net';
 import { settingsButton } from '../settings';
-import { btn } from './common';
+import { btn, practiceBadge } from './common';
 import type { RoomCtx, SubView } from './room';
 import { mySeat, seatName } from './room';
 
@@ -22,11 +22,12 @@ function fromRoom(room: RoomState): MatchEnd {
 }
 
 export function matchEndView(ctx: RoomCtx): SubView {
+  const practiceTag = practiceBadge();
   const main = h('main', { class: 'page matchend-main' });
   const el = h(
     'div',
     { class: 'app-shell matchend' },
-    h('header', { class: 'topbar' }, h('span', { class: 'topbar-title' }, 'Match over'), h('div', { class: 'topbar-actions' }, settingsButton())),
+    h('header', { class: 'topbar' }, h('span', { class: 'topbar-title' }, 'Match over', practiceTag), h('div', { class: 'topbar-actions' }, settingsButton())),
     main,
   );
   let key = '';
@@ -36,7 +37,8 @@ export function matchEndView(ctx: RoomCtx): SubView {
       const room = s.room!;
       const me = mySeat(room, ctx.userId);
       const m = s.matchEnd ?? fromRoom(room);
-      const k = JSON.stringify([m.standings, room.seats.map((x) => [x.kind, x.username, x.connected])]);
+      practiceTag.hidden = !room.practice;
+      const k = JSON.stringify([room.practice, m.standings, room.seats.map((x) => [x.kind, x.username, x.connected])]);
       if (k === key) return;
       key = k;
       const iWon = me !== null && m.winners.includes(me);
@@ -70,14 +72,22 @@ export function matchEndView(ctx: RoomCtx): SubView {
       const rematch = btn('Play again', { icon: icons.refresh, variant: 'primary btn-lg', onclick: () => send.rematch() });
       const home = btn('Home', { icon: icons.home, variant: 'ghost', onclick: () => ctx.leave() });
       main.replaceChildren(
-        h('section', { class: 'matchend-head' }, h('span', { class: 'trophy', html: icons.trophy }), h('h1', null, title), h('p', { class: 'muted' }, `The ${room.totalRounds}-round match is over.`)),
+        h('section', { class: 'matchend-head' }, h('span', { class: 'trophy', html: icons.trophy }), h('h1', null, title), h('p', { class: 'muted' }, `The ${room.totalRounds}-round match is over.`),
+          room.practice ? h('p', { class: 'practice-note' }, h('span', { html: icons.bot }), 'Practice match — stats unchanged') : null,
+        ),
         podium,
         h(
           'section',
           { class: 'matchend-actions' },
           canRematch ? rematch : null,
           home,
-          h('p', { class: 'hint center-text' }, 'Play again: the room returns to the lobby so you can start a new match with the same friends.'),
+          h(
+            'p',
+            { class: 'hint center-text' },
+            room.practice
+              ? 'Play again: a new practice match against the computer starts right away.'
+              : 'Play again: the room returns to the lobby so you can start a new match with the same friends.',
+          ),
         ),
       );
     },
