@@ -75,7 +75,8 @@ describe('wall and obstacle bounce', () => {
     ];
     for (const d of dirs) {
       const st = mkState([{ ...d, species: 'rock' }]);
-      for (let i = 0; i < 30; i++) {
+      // Few enough ticks that the unit reflects once and cannot reach the opposite wall.
+      for (let i = 0; i < 10; i++) {
         sim.tickSim(st, 5);
         const u = st.units[0];
         expect(u.x).toBeGreaterThanOrEqual(R - 1e-9);

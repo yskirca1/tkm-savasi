@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GRID_CELL, OBSTACLES_ENABLED, UNIT_RADIUS, WORLD_HEIGHT, WORLD_WIDTH } from '@tkm/shared';
+import { GRID_CELL, OBSTACLES_ENABLED, UNIT_RADIUS, UNIT_SPEED, WORLD_HEIGHT, WORLD_WIDTH } from '@tkm/shared';
 import { sim } from './index.js';
 import { penetration } from './testutil.js';
 import { createRoundWithMap } from './round.js';
@@ -68,7 +68,7 @@ describe('createRound placement', () => {
       expect(st.tick).toBe(0);
       expect(sim.speciesCounts(st)).toEqual([20, 20, 20]);
       for (const u of st.units) {
-        expect(Math.hypot(u.vx, u.vy)).toBeCloseTo(90, 9);
+        expect(Math.hypot(u.vx, u.vy)).toBeCloseTo(UNIT_SPEED, 9);
         expect(u.x).toBeGreaterThanOrEqual(UNIT_RADIUS + 2);
         expect(u.y).toBeGreaterThanOrEqual(UNIT_RADIUS + 2);
         expect(u.x).toBeLessThanOrEqual(WORLD_WIDTH - UNIT_RADIUS - 2);

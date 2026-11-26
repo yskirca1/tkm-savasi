@@ -28,7 +28,7 @@ export const WORLD_HEIGHT = 900;
 export const GRID_CELL = 60;
 export const UNIT_RADIUS = 20;
 /** Base speed in world units per second at 1x. */
-export const UNIT_SPEED = 90;
+export const UNIT_SPEED = 135;
 /** When false, rounds are played on an open arena: outer walls only, no obstacles. */
 export const OBSTACLES_ENABLED = false;
 export const DEFAULT_UNITS_PER_TYPE = 12;
