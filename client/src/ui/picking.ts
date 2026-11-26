@@ -1,5 +1,6 @@
 import { BEATS, PICK_TIME_MS, SPECIES, SPECIES_EMOJI, SPECIES_LABEL, type Species } from '@tkm/shared';
 import { avatar, h } from '../dom';
+import { GameRenderer } from '../game/renderer';
 import { icons } from '../icons';
 import { send, state, type NetState } from '../net';
 import { settingsButton } from '../settings';
@@ -39,6 +40,21 @@ export function pickingView(ctx: RoomCtx): SubView {
     cardsEl.appendChild(b);
   }
   const scores = h('ul', { class: 'mini-scores', 'aria-label': 'Scores' });
+  const firstLine = h('p', { class: 'first-picker' });
+
+  // Map preview (obstacles + walls only, same style as the game canvas). Below the cards so they stay visible.
+  const mapCanvas = h('canvas', { class: 'map-preview-canvas', role: 'img', 'aria-label': "This round's map" });
+  const mapWrap = h('div', { class: 'map-preview-wrap' }, mapCanvas);
+  const mapFig = h('figure', { class: 'map-preview card', hidden: true }, h('figcaption', null, h('span', { html: icons.flag }), "This round's map"), mapWrap);
+  const mapRenderer = new GameRenderer(mapCanvas);
+  let mapKey = '';
+  const drawMap = () => {
+    if (mapFig.hidden) return;
+    mapRenderer.fit(mapWrap.clientWidth, 200);
+    mapRenderer.drawStatic();
+  };
+  const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => drawMap()) : null;
+  ro?.observe(mapWrap);
 
   const el = h(
     'div',
@@ -50,7 +66,7 @@ export function pickingView(ctx: RoomCtx): SubView {
       roundLabel,
       h('div', { class: 'topbar-actions' }, settingsButton()),
     ),
-    h('main', { class: 'page picking-main' }, chips, h('section', { class: 'turn card' }, ring, h('div', { class: 'turn-texts' }, turnText, turnSub)), cardsEl, scores),
+    h('main', { class: 'page picking-main' }, firstLine, chips, h('section', { class: 'turn card' }, ring, h('div', { class: 'turn-texts' }, turnText, turnSub)), cardsEl, mapFig, scores),
   );
 
   let raf = 0;
@@ -108,11 +124,29 @@ export function pickingView(ctx: RoomCtx): SubView {
         }),
       );
 
+      // Who opens this round (pick order rotates every round).
+      const first = p ? p.order[0] : null;
+      firstLine.textContent = first === null ? '' : first === me ? 'You pick first this round' : `${seatName(room.seats[first])} picks first this round`;
+
+      // Map preview: same map the round will be played on.
+      const map = p?.map ?? null;
+      mapFig.hidden = !map;
+      const k = map ? `${room.round}:${JSON.stringify(map.obstacles)}` : '';
+      if (map && k !== mapKey) {
+        mapKey = k;
+        mapRenderer.setMap(map);
+      }
+      if (map) requestAnimationFrame(drawMap);
+
       // Turn banner
       el.classList.toggle('my-turn', myTurn);
+      const free = SPECIES.filter((sp) => !picks.includes(sp));
       if (!p || current === null) {
         turnText.textContent = 'All picks are in!';
         turnSub.textContent = 'The battle is starting…';
+      } else if (myTurn && free.length === 1) {
+        turnText.textContent = `You get ${SPECIES_LABEL[free[0]]} this round — last pick`;
+        turnSub.textContent = 'Assigned automatically.';
       } else if (myTurn) {
         turnText.textContent = 'Your turn!';
         turnSub.textContent = 'Pick a species. If time runs out, one is picked at random.';
@@ -162,6 +196,7 @@ export function pickingView(ctx: RoomCtx): SubView {
       );
     },
     destroy() {
+      ro?.disconnect();
       cancelAnimationFrame(raf);
     },
   };

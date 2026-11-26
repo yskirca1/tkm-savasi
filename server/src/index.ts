@@ -10,6 +10,7 @@ import { Server } from 'socket.io';
 import { createApiRouter } from './auth/routes.js';
 import { DevAuthProvider } from './auth/dev.js';
 import { SupabaseAuthProvider, createAdminClient } from './auth/supabase.js';
+import { GuestAuth } from './auth/guest.js';
 import type { AuthProvider } from './auth/types.js';
 import { DevDb } from './db/devdb.js';
 import { DevStore } from './db/dev.js';
@@ -60,7 +61,8 @@ const rooms = new RoomManager({
   unitsPerType: config.unitsPerType,
   saveMatch: (m) => store.saveMatch(m),
 });
-registerSocketHandlers(io, { auth, store, rooms });
+const guest = new GuestAuth(config.guestJwtSecret);
+registerSocketHandlers(io, { auth, guest, store, rooms });
 
 app.get('/healthz', (_req, res) => {
   res.json({ ok: true, mode: config.mode, rooms: rooms.rooms.size });
@@ -71,6 +73,7 @@ app.use(
   createApiRouter({
     config,
     auth,
+    guest,
     store,
     onRename: (userId, username) => rooms.renameUser(userId, username),
   }),

@@ -14,6 +14,8 @@ export const MSG = {
   notSupported: "This action isn't supported in this mode",
   profileExists: 'Profile already created',
   profileMissing: 'Choose a username first',
+  usernameGuest: "Usernames can't start with 'guest'",
+  guestNoRename: "Guests can't change their username. Sign up to pick one.",
   rateLimited: 'Too many attempts. Please try again later.',
   badRequest: 'Invalid request',
   server: 'Server error, please try again',

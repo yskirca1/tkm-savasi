@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
+import { deriveGuestSecret } from './auth/guest.js';
 import { DEFAULT_UNITS_PER_TYPE, MAX_UNITS_PER_TYPE, MIN_UNITS_PER_TYPE } from '@tkm/shared';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -25,6 +26,8 @@ export interface AppConfig {
   supabaseServiceRoleKey?: string;
   googleEnabled: boolean;
   devJwtSecret: string;
+  /** HS256 secret for guest tokens (both modes). */
+  guestJwtSecret: string;
   devDataFile: string;
   unitsPerType: number;
 }
@@ -41,6 +44,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const supabaseAnonKey = env.SUPABASE_ANON_KEY?.trim() || undefined;
   const supabaseServiceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY?.trim() || undefined;
   const mode = supabaseUrl && supabaseAnonKey && supabaseServiceRoleKey ? 'supabase' : 'dev';
+  const devJwtSecret = env.DEV_JWT_SECRET?.trim() || DEV_SECRET_FALLBACK;
 
   const port = Number.parseInt(env.PORT ?? '', 10);
   let units = Number.parseInt(env.UNITS_PER_TYPE ?? '', 10);
@@ -56,7 +60,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     supabaseAnonKey,
     supabaseServiceRoleKey,
     googleEnabled: mode === 'supabase' ? parseBool(env.GOOGLE_ENABLED, true) : false,
-    devJwtSecret: env.DEV_JWT_SECRET?.trim() || DEV_SECRET_FALLBACK,
+    devJwtSecret,
+    guestJwtSecret: deriveGuestSecret({
+      guestJwtSecret: env.GUEST_JWT_SECRET?.trim() || undefined,
+      baseSecret: mode === 'supabase' ? supabaseServiceRoleKey! : devJwtSecret,
+    }),
     devDataFile: path.join(SERVER_DIR, '.dev-data', 'db.json'),
     unitsPerType: units,
   };

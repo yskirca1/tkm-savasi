@@ -20,6 +20,7 @@ export function topbar(opts: { profile?: boolean; back?: string } = {}): HTMLEle
         { class: 'chip-link', href: '/profile', 'data-link': true, 'aria-label': `Profile: ${me.profile.username}` },
         avatar(me.profile.username, me.profile.avatarUrl, 32),
         h('span', { class: 'chip-name' }, me.profile.username),
+        me.guest ? h('span', { class: 'tag tag-guest' }, 'Guest') : null,
       ),
     );
     right.appendChild(
@@ -114,6 +115,7 @@ export function usernameProblem(u: string): string | null {
   if (u.length < USERNAME_MIN) return `Must be at least ${USERNAME_MIN} characters.`;
   if (u.length > USERNAME_MAX) return `Must be at most ${USERNAME_MAX} characters.`;
   if (!USERNAME_RE.test(u)) return 'Use only letters, numbers, underscores (_) and dots (.).';
+  if (/^guest/i.test(u)) return "Usernames can't start with 'guest'.";
   return null;
 }
 

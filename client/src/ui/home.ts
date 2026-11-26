@@ -6,6 +6,43 @@ import { netEvents, send, state } from '../net';
 import { navigate, type View } from '../router';
 import { toast } from '../toast';
 import { btn, busy, nextId, topbar } from './common';
+import { signUpFromGuest } from './profile';
+
+const BANNER_KEY = 'tkm.guestBannerDismissed';
+
+/** Slim, dismissible "sign up to keep your stats" banner for guests (dismissal lasts for this browser session). */
+function guestBanner(): HTMLElement | null {
+  try {
+    if (sessionStorage.getItem(BANNER_KEY)) return null;
+  } catch {
+    /* ignore */
+  }
+  const el = h(
+    'aside',
+    { class: 'guest-banner', 'aria-label': 'Guest session' },
+    h('span', { class: 'guest-banner-icon', 'aria-hidden': 'true', html: icons.user }),
+    h('p', null, "You're playing as a guest — sign up to keep your stats."),
+    btn('Sign up', { variant: 'primary', onclick: signUpFromGuest }),
+  );
+  el.appendChild(
+    h('button', {
+      type: 'button',
+      class: 'icon-btn guest-banner-close',
+      'aria-label': 'Dismiss',
+      title: 'Dismiss',
+      html: icons.x,
+      onclick: () => {
+        try {
+          sessionStorage.setItem(BANNER_KEY, '1');
+        } catch {
+          /* ignore */
+        }
+        el.remove();
+      },
+    }),
+  );
+  return el;
+}
 
 const CODE_CHARS = /[^A-Z]/g;
 
@@ -130,6 +167,7 @@ export const homeView: View = async (root) => {
           h('h1', null, name ? `Hi, ${name}!` : 'Hi there!'),
           h('p', { class: 'muted' }, 'Jump into a quick match or invite your friends, then pick your species. The last one standing wins the round!'),
         ),
+        me?.guest ? guestBanner() : null,
         resume,
         h(
           'section',

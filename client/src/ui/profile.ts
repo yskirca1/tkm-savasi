@@ -1,10 +1,27 @@
 import { api } from '../api';
-import { loadMe, setMe } from '../auth';
+import { endGuestSession, loadMe, setMe } from '../auth';
 import { avatar, h } from '../dom';
 import { icons } from '../icons';
-import type { View } from '../router';
+import { navigate, type View } from '../router';
 import { toast } from '../toast';
 import { btn, busy, formAlert, topbar, usernameField } from './common';
+
+/** "Sign up to keep your stats" card for guests (profile page; the home banner uses the same action). */
+export function signUpFromGuest(): void {
+  endGuestSession();
+  navigate('/register');
+}
+
+function guestSignupCard(): HTMLElement {
+  return h(
+    'section',
+    { class: 'card guest-card' },
+    h('span', { class: 'guest-card-icon', html: icons.star }),
+    h('h2', null, "You're playing as a guest — sign up to keep your stats"),
+    h('p', { class: 'muted' }, "Guest games aren't saved. Create a free account to track your wins and pick your own username."),
+    btn('Sign up', { icon: icons.plus, variant: 'primary', onclick: signUpFromGuest }),
+  );
+}
 
 export const profileView: View = async (root) => {
   const main = h('main', { class: 'page profile' });
@@ -21,6 +38,16 @@ export const profileView: View = async (root) => {
   const username = me.profile?.username ?? '';
   const title = h('h1', null, username);
   const avatarSlot = h('div', { class: 'profile-avatar' }, avatar(username, me.profile?.avatarUrl ?? null, 88));
+
+  if (me.guest) {
+    // Guests: no rename, no stats — just the sign-up call to action.
+    main.innerHTML = '';
+    main.append(
+      h('section', { class: 'profile-head' }, avatarSlot, h('div', { class: 'profile-title' }, title, h('span', { class: 'tag tag-guest' }, 'Guest'))),
+      guestSignupCard(),
+    );
+    return;
+  }
 
   const alert = formAlert();
   const user = usernameField({ value: username, current: username, label: 'Change your username' });

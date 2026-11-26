@@ -11,11 +11,13 @@ import {
   ROUND_INTRO_MS,
   ROUND_OPTIONS,
   SNAPSHOT_EVERY_TICKS,
+  SPECIES,
   SPECIES_INDEX,
   TICK_MS,
   TICK_RATE,
   VOTE_OPEN_SEC,
   type GameSnapshot,
+  type MapData,
   type MatchEnd,
   type PickState,
   type RoomPhase,
@@ -40,6 +42,8 @@ import type { Scheduler, TimerHandle } from './scheduler.js';
 
 /** Lobby / match-end reload grace before a disconnected human loses the seat. */
 export const LOBBY_DISCONNECT_GRACE_MS = 5_000;
+/** A human whose turn comes with only one species left gets it automatically after this delay. */
+export const FORCED_PICK_DELAY_MS = 800;
 
 export type ServerEvent = keyof ServerToClientEvents;
 export type EventPayload<E extends ServerEvent> = Parameters<ServerToClientEvents[E]>[0];
@@ -96,6 +100,10 @@ interface PhaseTimer {
 
 interface PickRuntime {
   order: [SeatIndex, SeatIndex, SeatIndex];
+  /** Round seed chosen at pick-phase start; createRound uses the same one. */
+  seed: number;
+  /** sim.generateMap(seed): previewed while picking (no unit positions). */
+  map: MapData;
   turn: number;
   botThinking: boolean;
 }
@@ -238,9 +246,10 @@ export class Room {
 
   pickState(): PickState | null {
     if (!this.pick) return null;
-    const { order, turn, botThinking } = this.pick;
+    const { order, turn, botThinking, map } = this.pick;
     return {
       round: this.round,
+      map,
       order: [...order],
       turn,
       currentSeat: turn < 3 ? order[turn] : null,
@@ -653,7 +662,16 @@ export class Room {
     this.lastRoundEnd = null;
     const roundInBlock = (r - 1) % 3;
     if (roundInBlock === 0) this.blockPerm = this.deps.sim.randomSeatPerm(this.deps.random);
-    this.pick = { order: this.deps.sim.pickOrder(this.blockPerm, roundInBlock), turn: 0, botThinking: false };
+    // Seed is chosen now so the map can be previewed during picking; finishPicks reuses it.
+    const seed = Math.floor(this.deps.random() * 0x1_0000_0000) >>> 0;
+    this.log(`round ${r} seed ${seed}`);
+    this.pick = {
+      order: this.deps.sim.pickOrder(this.blockPerm, roundInBlock),
+      turn: 0,
+      botThinking: false,
+      seed,
+      map: this.deps.sim.generateMap(seed),
+    };
     this.phase = 'picking';
     this.emitState();
     this.beginTurn();
@@ -675,7 +693,13 @@ export class Room {
       });
     } else {
       pick.botThinking = false;
-      this.schedule(PICK_TIME_MS, () => this.applyPick(seatIdx, randomUntaken(this.picks, this.deps.random)));
+      const left = SPECIES.filter((sp) => !this.picks.includes(sp));
+      if (left.length === 1) {
+        // Forced last pick: show the turn briefly, then assign it (a pick:choose in the window still works).
+        this.schedule(FORCED_PICK_DELAY_MS, () => this.applyPick(seatIdx, left[0]));
+      } else {
+        this.schedule(PICK_TIME_MS, () => this.applyPick(seatIdx, randomUntaken(this.picks, this.deps.random)));
+      }
     }
     this.emitPick();
   }
@@ -711,8 +735,7 @@ export class Room {
       this.emitPick(); // turn === 3
     }
     const seatSpecies = this.picks as [Species, Species, Species];
-    const seed = Math.floor(this.deps.random() * 0x1_0000_0000) >>> 0;
-    this.log(`round ${this.round} seed ${seed}`);
+    const seed = pick ? pick.seed : Math.floor(this.deps.random() * 0x1_0000_0000) >>> 0;
     this.seatSpecies = [...seatSpecies];
     this.simState = this.deps.sim.createRound(seed, this.deps.unitsPerType);
     this.playTicks = 0;

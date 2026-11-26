@@ -40,3 +40,19 @@ describe('computeMatchResults', () => {
     expect(r[0].isWinner || r[2].isWinner).toBe(false);
   });
 });
+
+describe('computeMatchResults (guests)', () => {
+  it('drops guest participants; returns [] when only guests played', () => {
+    const seats = [
+      { kind: 'human' as const, userId: 'guest:x' },
+      { kind: 'human' as const, userId: 'u1' },
+      { kind: 'bot' as const, userId: null },
+    ];
+    const parts = [
+      { userId: 'guest:x', seat: 0 as const, roundsWon: 2, finishedInSeat: true },
+      { userId: 'u1', seat: 1 as const, roundsWon: 1, finishedInSeat: true },
+    ];
+    expect(computeMatchResults(seats, parts, [0]).map((r) => r.userId)).toEqual(['u1']);
+    expect(computeMatchResults(seats, [parts[0]], [0])).toEqual([]);
+  });
+});

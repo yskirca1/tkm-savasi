@@ -7,6 +7,7 @@ import {
   type ServerToClientEvents,
   type Species,
 } from '@tkm/shared';
+import { GuestAuth, isGuestUserId } from '../auth/guest.js';
 import type { AuthProvider } from '../auth/types.js';
 import type { Store } from '../db/types.js';
 import { MSG } from '../errors.js';
@@ -40,14 +41,20 @@ export function createSocketTransport(io: GameServer): Transport {
   };
 }
 
-export function registerSocketHandlers(io: GameServer, deps: { auth: AuthProvider; store: Store; rooms: RoomManager }): void {
-  const { auth, store, rooms } = deps;
+export function registerSocketHandlers(io: GameServer, deps: { auth: AuthProvider; guest: GuestAuth; store: Store; rooms: RoomManager }): void {
+  const { auth, guest, store, rooms } = deps;
 
   // ---- handshake auth: socket.handshake.auth.token
   io.use(async (socket, next) => {
     try {
       const token = (socket.handshake.auth as { token?: unknown } | undefined)?.token;
       if (typeof token !== 'string' || !token) return next(new Error('unauthorized'));
+      // Guests first: local check, no Store/profile lookup (never 'profil_gerekli').
+      const g = await guest.verify(token);
+      if (g) {
+        socket.data = { userId: g.userId, username: g.name, avatarUrl: null };
+        return next();
+      }
       const user = await auth.verifyToken(token);
       if (!user) return next(new Error('unauthorized'));
       const profile = await store.getProfile(user.userId);
@@ -71,8 +78,8 @@ export function registerSocketHandlers(io: GameServer, deps: { auth: AuthProvide
       if (message) socket.emit('error:msg', { message });
     };
     const currentUser = async (): Promise<RoomUser> => {
-      // usernames can change (PATCH /api/profile): fetch fresh at join time
-      const p = await store.getProfile(userId).catch(() => null);
+      // usernames can change (PATCH /api/profile): fetch fresh at join time. Guests have no profile.
+      const p = isGuestUserId(userId) ? null : await store.getProfile(userId).catch(() => null);
       if (p) {
         socket.data.username = p.username;
         socket.data.avatarUrl = p.avatarUrl;

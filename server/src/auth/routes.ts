@@ -5,6 +5,7 @@ import type { AppConfig } from '../config.js';
 import { HttpError, MSG } from '../errors.js';
 import type { Store } from '../db/types.js';
 import { UsernameTakenError } from '../db/types.js';
+import { GuestAuth, createTokenVerifier } from './guest.js';
 import type { AuthProvider, VerifiedUser } from './types.js';
 import { assertUsername, suggestUsername, usernameError } from './validation.js';
 
@@ -12,6 +13,8 @@ export interface ApiDeps {
   config: AppConfig;
   auth: AuthProvider;
   store: Store;
+  /** Guest token issuer/verifier (checked before the mode's AuthProvider). Defaults to one from config. */
+  guest?: GuestAuth;
   /** Propagate a rename into live rooms. */
   onRename?: (userId: string, username: string) => void;
 }
@@ -43,22 +46,43 @@ function str(v: unknown): string {
   return typeof v === 'string' ? v : '';
 }
 
+/** /api/me for a guest: generated name, no avatar, zero stats, no Store lookup. */
+export function guestMe(user: VerifiedUser): MeResponse {
+  return {
+    userId: user.userId,
+    guest: true,
+    profile: { username: user.name ?? 'Guest', avatarUrl: null },
+    stats: { gamesPlayed: 0, gamesWon: 0, roundsWon: 0 },
+  };
+}
+
 export function createApiRouter(deps: ApiDeps): Router {
   const { config, auth, store } = deps;
+  const guest = deps.guest ?? new GuestAuth(config.guestJwtSecret);
+  const verify = createTokenVerifier(guest, auth);
   const r = express.Router();
   r.use(express.json({ limit: '16kb' }));
 
   const requireUser = async (req: Request): Promise<VerifiedUser> => {
     const token = bearer(req);
-    const user = token ? await auth.verifyToken(token) : null;
+    const user = token ? await verify(token) : null;
     if (!user) throw new HttpError(401, MSG.unauthorized);
     return user;
   };
 
+  /** Registered users only (guests have no profile to create or rename). */
+  const requireRegistered = async (req: Request): Promise<VerifiedUser> => {
+    const user = await requireUser(req);
+    if (user.guest) throw new HttpError(403, MSG.guestNoRename);
+    return user;
+  };
+
   const me = async (user: VerifiedUser): Promise<MeResponse> => {
+    if (user.guest) return guestMe(user);
     const [profile, stats] = await Promise.all([store.getProfile(user.userId), store.getStats(user.userId)]);
     const out: MeResponse = {
       userId: user.userId,
+      guest: false,
       profile: profile ? { username: profile.username, avatarUrl: profile.avatarUrl } : null,
       stats,
     };
@@ -84,7 +108,7 @@ export function createApiRouter(deps: ApiDeps): Router {
       const err = usernameError(u);
       if (err) return res.json({ available: false, reason: err });
       const token = bearer(req);
-      const user = token ? await auth.verifyToken(token) : null;
+      const user = token ? await verify(token) : null;
       const taken = await store.isUsernameTaken(u, user?.userId);
       res.json(taken ? { available: false, reason: MSG.usernameTaken } : { available: true });
     }),
@@ -98,6 +122,14 @@ export function createApiRouter(deps: ApiDeps): Router {
     wrap(async (req, res) => {
       const b = req.body ?? {};
       res.json(await auth.register(str(b.username).trim(), str(b.email).trim(), str(b.password)));
+    }),
+  );
+
+  r.post(
+    '/auth/guest',
+    limiter(15 * 60_000, 20),
+    wrap(async (_req, res) => {
+      res.json(await guest.issue());
     }),
   );
 
@@ -151,7 +183,7 @@ export function createApiRouter(deps: ApiDeps): Router {
     '/profile',
     limiter(60_000, 30),
     wrap(async (req, res) => {
-      const user = await requireUser(req);
+      const user = await requireRegistered(req);
       const username = str(req.body?.username).trim();
       assertUsername(username);
       if (await store.getProfile(user.userId)) throw new HttpError(409, MSG.profileExists);
@@ -171,7 +203,7 @@ export function createApiRouter(deps: ApiDeps): Router {
     '/profile',
     limiter(60_000, 30),
     wrap(async (req, res) => {
-      const user = await requireUser(req);
+      const user = await requireRegistered(req);
       const username = str(req.body?.username).trim();
       assertUsername(username);
       const current = await store.getProfile(user.userId);

@@ -6,6 +6,8 @@ export interface VerifiedUser {
   /** Provider display name (Google full_name/name). */
   name?: string;
   avatarUrl?: string;
+  /** Guest session (no account): never looked up in the Store. */
+  guest?: boolean;
 }
 
 /**

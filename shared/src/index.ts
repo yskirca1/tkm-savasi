@@ -22,9 +22,9 @@ export type SeatIndex = 0 | 1 | 2;
 
 // ---------- World / simulation ----------
 /** Logical world size in world units. The client scales it to the screen keeping aspect ratio. */
-export const WORLD_WIDTH = 900;
-export const WORLD_HEIGHT = 600;
-/** Map generation grid cell (world units). WORLD is 30 x 20 cells. Obstacles are cell-aligned. */
+export const WORLD_WIDTH = 720;
+export const WORLD_HEIGHT = 480;
+/** Map generation grid cell (world units). WORLD is 24 x 16 cells. Obstacles are cell-aligned. */
 export const GRID_CELL = 30;
 export const UNIT_RADIUS = 11;
 /** Base speed in world units per second at 1x. */
@@ -70,6 +70,9 @@ export const USERNAME_MAX = 20;
 /** Letters (incl. Turkish), digits, underscore, dot. Case-insensitive uniqueness. */
 export const USERNAME_RE = /^[A-Za-z0-9_.çğıöşüÇĞİÖŞÜ]{3,20}$/;
 export const PASSWORD_MIN = 8;
+/** Guest display names are `${GUEST_PREFIX}-1234`; registered usernames may not start with "guest" (case-insensitive). */
+export const GUEST_PREFIX = 'Guest';
+export const GUEST_SESSION_HOURS = 24;
 
 // ---------- Shapes ----------
 export interface Rect { x: number; y: number; w: number; h: number }
@@ -129,6 +132,8 @@ export interface PickState {
   picks: [Species | null, Species | null, Species | null];
   /** Species already taken (locked) this round. */
   locked: Species[];
+  /** This round's map, shown as a preview while picking (same map the round will be played on). */
+  map: MapData;
 }
 
 export interface RoundStart {
@@ -230,6 +235,7 @@ export interface SocketAuth { token: string }
 // GET  /api/username-available?u=name     -> { available: boolean; reason?: string }
 // POST /api/auth/register  {username,email,password}  -> AuthSession          (rate limited)
 // POST /api/auth/login     {identifier,password}      -> AuthSession          (rate limited; identifier = username or email)
+// POST /api/auth/guest    {}                         -> AuthSession          (rate limited; guest identity, no account)
 // POST /api/auth/forgot    {identifier}               -> { ok: true }         (rate limited; always ok)
 // POST /api/auth/reset     {token,password}           -> { ok: true }         (dev mode only; supabase mode uses supabase-js updateUser)
 // POST /api/auth/refresh   {refresh_token}            -> AuthSession          (dev mode only)
@@ -256,6 +262,8 @@ export interface ProfileStats { gamesPlayed: number; gamesWon: number; roundsWon
 
 export interface MeResponse {
   userId: string;
+  /** True for guest sessions (no account). Guests have a generated username, no stats, cannot rename. */
+  guest: boolean;
   /** null if the user has no profile yet (first Google login) — client must show username picker. */
   profile: { username: string; avatarUrl: string | null } | null;
   /** Present when profile is null: a free username derived from the provider name. */

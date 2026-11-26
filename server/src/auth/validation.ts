@@ -6,7 +6,13 @@ export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function usernameError(u: unknown): string | null {
   if (typeof u !== 'string' || !USERNAME_RE.test(u)) return MSG.usernameInvalid;
+  if (isReservedGuestName(u)) return MSG.usernameGuest;
   return null;
+}
+
+/** Names starting with "guest" (any case) are reserved for guest sessions. */
+export function isReservedGuestName(u: string): boolean {
+  return /^guest/i.test(u);
 }
 
 export function assertUsername(u: unknown): asserts u is string {
@@ -31,7 +37,10 @@ const TR_MAP: Record<string, string> = {
 export function usernameBaseFromName(name: string | undefined | null): string {
   let s = (name ?? '').replace(/[çÇğĞıIİöÖşŞüÜ]/g, (c) => TR_MAP[c] ?? c);
   s = s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-  s = s.replace(/[^a-z0-9_.]/g, '').slice(0, 16);
+  s = s.replace(/[^a-z0-9_.]/g, '');
+  // Never suggest a reserved guest name (lowercased already): "guest_x" -> "player_x".
+  if (isReservedGuestName(s)) s = 'player' + s.slice(5);
+  s = s.slice(0, 16);
   if (s.length < 3) s = (s + 'player').slice(0, 16);
   return s;
 }

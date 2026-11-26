@@ -15,7 +15,8 @@ import {
   type Species,
 } from '@tkm/shared';
 import type { Room } from './Room.js';
-import { LOBBY_DISCONNECT_GRACE_MS } from './Room.js';
+import { FORCED_PICK_DELAY_MS, LOBBY_DISCONNECT_GRACE_MS } from './Room.js';
+import { sim as realSim } from '../sim/index.js';
 import { setup, USERS } from './testkit.js';
 import { MSG } from '../errors.js';
 
@@ -843,5 +844,189 @@ describe('practice', () => {
     const q = env.mgr.quickMatch(USERS.a);
     expect(q.ok && q.code).not.toBe(code);
     expect(env.mgr.getRoom(code)).toBeUndefined();
+  });
+});
+
+describe('guests', () => {
+  const G1 = { userId: 'guest:11111111-1111-4111-8111-111111111111', username: 'Guest-0001', avatarUrl: null };
+  const G2 = { userId: 'guest:22222222-2222-4222-8222-222222222222', username: 'Guest-0002', avatarUrl: null };
+  const G3 = { userId: 'guest:33333333-3333-4333-8333-333333333333', username: 'Guest-0003', avatarUrl: null };
+
+  function playOut(env: Env, room: Room): void {
+    room.totalRounds = 3;
+    for (let r = 1; r <= 3; r++) {
+      toPlaying(env, room);
+      finishRoundSole(env, room, room.picks[0]!); // seat 0 wins every round
+      env.sched.advance(ROUND_END_DELAY_MS + 1);
+    }
+    expect(room.phase).toBe('matchEnd');
+  }
+
+  it('mixed room: the registered players are saved, the guest is not', () => {
+    const env = setup();
+    const { code } = env.mgr.createRoom(G1); // guest host in seat 0 wins
+    env.mgr.joinRoom(USERS.a, code);
+    env.mgr.joinRoom(USERS.b, code);
+    const room = env.mgr.getRoom(code)!;
+    expect(room.phase).toBe('picking');
+    playOut(env, room);
+    expect(env.saved).toHaveLength(1);
+    const ids = env.saved[0].results.map((r) => r.userId).sort();
+    expect(ids).toEqual([USERS.a.userId, USERS.b.userId].sort());
+    expect(env.saved[0].results.every((r) => !r.isWinner)).toBe(true);
+  });
+
+  it('all-guest room: nothing is saved', () => {
+    const env = setup();
+    const { code } = env.mgr.createRoom(G1);
+    env.mgr.joinRoom(G2, code);
+    env.mgr.joinRoom(G3, code);
+    const room = env.mgr.getRoom(code)!;
+    playOut(env, room);
+    expect(env.transport.last('match:end')).toBeDefined();
+    expect(env.saved).toHaveLength(0);
+  });
+
+  it('guests can create/join rooms, quick match and practice', () => {
+    const env = setup();
+    const { code } = env.mgr.createRoom(G1);
+    expect(env.mgr.joinRoom(G2, code).ok).toBe(true);
+    expect(env.mgr.getRoom(code)!.humanCount()).toBe(2);
+
+    const q1 = env.mgr.quickMatch(G3);
+    const q2 = env.mgr.quickMatch(USERS.a);
+    expect(q1.ok && q2.ok && q1.code === q2.code).toBe(true);
+
+    const { code: p } = env.mgr.practice(G1);
+    const pr = env.mgr.getRoom(p)!;
+    expect(pr.practice).toBe(true);
+    expect(pr.phase).toBe('picking');
+    expect(pr.seats[0].userId).toBe(G1.userId);
+  });
+});
+
+describe('map preview while picking', () => {
+  it('pick:state carries the round map; round:start uses the same map; seeds change per round', () => {
+    const env = setup();
+    const room = threeHumans(env);
+    const previews: unknown[] = [];
+    const seeds: number[] = [];
+    for (let r = 1; r <= 3; r++) {
+      const ps = env.transport.last('pick:state')!;
+      expect(ps.round).toBe(r);
+      expect(ps.map.obstacles.length).toBeGreaterThan(0);
+      // every pick:state of this round shows the same map
+      pickAll(env, room);
+      const statesThisRound = env.transport.of('pick:state').filter((p) => p.round === r);
+      expect(statesThisRound.length).toBeGreaterThan(1);
+      for (const p of statesThisRound) expect(p.map).toEqual(ps.map);
+      const rs = env.transport.last('round:start')!;
+      expect(rs.round).toBe(r);
+      expect(rs.map).toEqual(ps.map);
+      expect(realSim.generateMap(rs.seed)).toEqual(ps.map);
+      previews.push(ps.map);
+      seeds.push(rs.seed);
+      env.sched.advance(ROUND_INTRO_MS + 1);
+      finishRoundSole(env, room, 'rock');
+      env.sched.advance(ROUND_END_DELAY_MS + 1);
+    }
+    expect(new Set(seeds).size).toBe(3);
+    expect(previews[0]).not.toEqual(previews[1]);
+    // seed is logged when the pick phase starts, once per round
+    expect(env.logs.filter((l) => /round 1 seed/.test(l))).toHaveLength(1);
+  });
+
+  it('a reconnecting client gets the map in its pick:state sync', () => {
+    const env = setup();
+    const room = threeHumans(env);
+    const map = room.pickState()!.map;
+    env.transport.clear();
+    env.mgr.sync(USERS.b.userId);
+    expect(env.transport.last('pick:state')!.map).toEqual(map);
+  });
+});
+
+describe('forced last pick', () => {
+  function chooseCurrent(env: Env, room: Room): void {
+    const ps = room.pickState()!;
+    const seat = room.seats[ps.currentSeat!];
+    const free = SPECIES.find((sp) => !room.picks.includes(sp))!;
+    expect(room.choose(seat.userId!, free)).toBeUndefined();
+  }
+
+  it('the third human gets the last species automatically after 800 ms', () => {
+    const env = setup();
+    const room = threeHumans(env);
+    chooseCurrent(env, room);
+    chooseCurrent(env, room);
+    const ps = env.transport.last('pick:state')!;
+    expect(ps.turn).toBe(2);
+    const third = ps.currentSeat!;
+    expect(ps.remainingMs).toBe(FORCED_PICK_DELAY_MS);
+    const last = SPECIES.find((sp) => !room.picks.includes(sp))!;
+    env.sched.advance(FORCED_PICK_DELAY_MS - 1);
+    expect(room.phase).toBe('picking');
+    expect(room.picks[third]).toBeNull();
+    env.sched.advance(1);
+    expect(room.picks[third]).toBe(last);
+    expect(room.phase).toBe('intro');
+  });
+
+  it('a click inside the window is accepted as usual', () => {
+    const env = setup();
+    const room = threeHumans(env);
+    chooseCurrent(env, room);
+    chooseCurrent(env, room);
+    env.sched.advance(300);
+    chooseCurrent(env, room);
+    expect(room.phase).toBe('intro');
+  });
+
+  it('first and second pickers still have the full 15 s', () => {
+    const env = setup();
+    const room = threeHumans(env);
+    env.sched.advance(PICK_TIME_MS - 10);
+    expect(room.pickState()!.turn).toBe(0);
+    env.sched.advance(20);
+    expect(room.pickState()!.turn).toBe(1);
+    expect(room.pickState()!.remainingMs).toBe(PICK_TIME_MS - 10); // 10 ms past the first timeout
+    env.sched.advance(PICK_TIME_MS - 30); // 20 ms before the second timeout
+    expect(room.pickState()!.turn).toBe(1);
+    env.sched.advance(30);
+    expect(room.pickState()!.turn).toBe(2);
+    expect(room.pickState()!.remainingMs).toBe(FORCED_PICK_DELAY_MS - 10);
+  });
+
+  it('the forced-pick timer freezes while paused', () => {
+    const env = setup();
+    const room = threeHumans(env);
+    chooseCurrent(env, room);
+    chooseCurrent(env, room);
+    env.sched.advance(500);
+    env.mgr.handleDisconnect(USERS.a.userId);
+    expect(room.paused).not.toBeNull();
+    env.sched.advance(5_000);
+    expect(room.phase).toBe('picking');
+    env.mgr.handleConnect(USERS.a.userId);
+    env.sched.advance(299);
+    expect(room.phase).toBe('picking');
+    env.sched.advance(1);
+    expect(room.phase).toBe('intro');
+  });
+
+  it('bots are unchanged (1 s think even for the last species)', () => {
+    const env = setup();
+    const room = twoHumansAndBot(env);
+    let guard = 0;
+    while (room.pickState()!.turn < 2 && guard++ < 5) {
+      const ps = room.pickState()!;
+      if (room.seats[ps.currentSeat!].kind === 'bot') env.sched.advance(BOT_THINK_MS + 1);
+      else chooseCurrent(env, room);
+    }
+    const ps = room.pickState()!;
+    if (room.seats[ps.currentSeat!].kind === 'bot') {
+      expect(ps.botThinking).toBe(true);
+      expect(ps.remainingMs).toBe(BOT_THINK_MS);
+    }
   });
 });

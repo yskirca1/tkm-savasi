@@ -1,7 +1,7 @@
 // Login, register, forgot-password and reset-password screens.
 import { PASSWORD_MIN } from '@tkm/shared';
 import { api } from '../api';
-import { consumeNext, getConfig, hasRecoverySession, loadMe, loginWithGoogle, loginWithPassword, register, startupHash, updatePasswordWithRecovery } from '../auth';
+import { consumeNext, getConfig, hasRecoverySession, loadMe, loginAsGuest, loginWithGoogle, loginWithPassword, register, startupHash, updatePasswordWithRecovery } from '../auth';
 import { h } from '../dom';
 import { googleLogo, icons } from '../icons';
 import { navigate, type View } from '../router';
@@ -45,6 +45,26 @@ export const loginView: View = (root) => {
     }),
   );
 
+  const guestBtn = btn('Play as guest', { icon: icons.user, block: true, variant: 'ghost', type: 'button' });
+  guestBtn.setAttribute('aria-describedby', 'guest-hint');
+  guestBtn.addEventListener('click', () =>
+    busy(guestBtn, async () => {
+      alert.set(null);
+      try {
+        await loginAsGuest();
+        await afterLogin(); // returns to a pending invite link (/r/CODE) if there is one
+      } catch (err) {
+        alert.set(err instanceof Error ? err.message : "Couldn't start a guest session.");
+      }
+    }),
+  );
+  const guestBlock = h(
+    'div',
+    { class: 'guest-block' },
+    guestBtn,
+    h('p', { class: 'hint center-text', id: 'guest-hint' }, "No account needed. Guest scores aren't saved."),
+  );
+
   const form = h(
     'form',
     { class: 'stack', novalidate: true },
@@ -80,6 +100,8 @@ export const loginView: View = (root) => {
       !cfg.googleEnabled ? h('p', { class: 'hint center-text', id: 'google-hint' }, 'Google login is turned off on this server. Continue with your username and password.') : null,
       h('div', { class: 'divider' }, h('span', null, 'or')),
       form,
+      h('div', { class: 'divider' }, h('span', null, 'or')),
+      guestBlock,
       h('p', { class: 'center-text muted' }, 'Don\'t have an account? ', h('a', { href: '/register', 'data-link': true, class: 'link' }, 'Sign up')),
     ),
   );

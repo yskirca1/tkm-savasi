@@ -31,7 +31,7 @@ export class FakePhysics {
       this.counts = [unitsPerType, unitsPerType, unitsPerType];
       this.state = {
         seed,
-        map: { width: 900, height: 600, obstacles: [] },
+        map: realSim.generateMap(seed), // same map the real sim would build (preview == round map)
         units: this.unitsFor(this.counts),
         tick: 0,
         convertedSinceDrain: [],

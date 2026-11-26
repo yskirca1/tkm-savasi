@@ -70,6 +70,7 @@ export const api = {
     raw<{ available: boolean; reason?: string }>('GET', `/username-available?u=${encodeURIComponent(u)}`),
   register: (username: string, email: string, password: string) =>
     raw<AuthSession>('POST', '/auth/register', { username, email, password }),
+  guest: () => raw<AuthSession>('POST', '/auth/guest', {}),
   login: (identifier: string, password: string) => raw<AuthSession>('POST', '/auth/login', { identifier, password }),
   forgot: (identifier: string) => raw<{ ok: true }>('POST', '/auth/forgot', { identifier }),
   devReset: (token: string, password: string) => raw<{ ok: true }>('POST', '/auth/reset', { token, password }),

@@ -1,5 +1,6 @@
 import type { SeatIndex, SeatKind } from '@tkm/shared';
 import type { MatchResultInput } from '../db/types.js';
+import { isGuestUserId } from '../auth/guest.js';
 
 /** A human who held a seat when the match started. */
 export interface Participant {
@@ -20,6 +21,7 @@ export interface SeatOccupant {
  * Per-human results for Store.saveMatch.
  * - A human is a winner iff they still hold their seat and that seat is among `winners` (ties share).
  * - Bot seats (incl. bots that replaced a human) never give anyone a win.
+ * - Guests (`guest:` ids) are excluded; an empty result means the match is not saved at all.
  */
 export function computeMatchResults(
   seats: readonly SeatOccupant[],
@@ -28,6 +30,8 @@ export function computeMatchResults(
 ): MatchResultInput[] {
   const out: MatchResultInput[] = [];
   for (const p of participants) {
+    // Guests have no profile (FK) and no stats: never part of the saved results.
+    if (isGuestUserId(p.userId)) continue;
     const seat = seats[p.seat];
     const stillSeated = p.finishedInSeat && seat?.kind === 'human' && seat.userId === p.userId;
     out.push({

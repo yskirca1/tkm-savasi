@@ -1,4 +1,5 @@
-// Canvas renderer: static map layer (floor, clay obstacles) + emoji unit sprites + conversion effects.
+// Canvas renderer: static map layer (floor, clay obstacles) + bare emoji unit sprites + conversion effects.
+// Units are drawn as the emoji only (no disc/ring), sized to the hitbox diameter (2 x UNIT_RADIUS).
 import { GRID_CELL, SPECIES_EMOJI, UNIT_RADIUS, WORLD_HEIGHT, WORLD_WIDTH, type MapData, type Rect, type Species } from '@tkm/shared';
 import { SPECIES_BY_INDEX, SPECIES_COLOR } from '../theme';
 import { ConversionFx, easeOutCubic, popScale } from './effects';
@@ -55,9 +56,9 @@ export class GameRenderer {
   }
 
   private buildSprites(): void {
-    // Keep units legible on small phones: never smaller than ~7 CSS px radius.
-    const r = Math.max((UNIT_RADIUS + 1.5) * this.scale, 7) * this.dpr * SPRITE_OVERSAMPLE;
-    const pad = Math.ceil(r * 0.25);
+    // r = hitbox radius in device px (never below ~6 CSS px so units stay legible on small phones).
+    const r = Math.max(UNIT_RADIUS * this.scale, 6) * this.dpr * SPRITE_OVERSAMPLE;
+    const pad = Math.ceil(r * 0.2);
     const size = Math.ceil(r * 2 + pad * 2);
     this.sprites = SPECIES_BY_INDEX.map((sp) => makeSprite(sp, size, r));
   }
@@ -92,6 +93,12 @@ export class GameRenderer {
     for (const o of this.map?.obstacles ?? []) drawClayBlock(g, o);
   }
 
+  /** Map only (floor, walls, obstacles) — used for the picking-screen preview. */
+  drawStatic(): void {
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.ctx.drawImage(this.staticLayer, 0, 0);
+  }
+
   draw(sample: Sample | null, fx: ConversionFx, now: number): void {
     const ctx = this.ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -109,7 +116,7 @@ export class GameRenderer {
       const spr = this.sprites[sample.s[i]];
       ctx.drawImage(spr, sample.x[i] * k - base / 2, sample.y[i] * k - base / 2, base, base);
     }
-    // Converting units: flash ring in the new color + pop.
+    // Converting units: brief fading flash ring in the new color + pop; once done, the plain emoji again.
     for (const r of rings) {
       const color = SPECIES_COLOR[SPECIES_BY_INDEX[r.s]].main;
       const ringR = (UNIT_RADIUS * (1.2 + 1.8 * easeOutCubic(r.p))) * k;
@@ -139,28 +146,14 @@ function makeSprite(sp: Species, size: number, r: number): HTMLCanvasElement {
   const g = c.getContext('2d')!;
   const cx = size / 2;
   const cy = size / 2;
-  const col = SPECIES_COLOR[sp];
-  // drop shadow
-  g.fillStyle = 'rgba(30,27,75,0.22)';
-  g.beginPath();
-  g.ellipse(cx, cy + r * 0.22, r * 0.95, r * 0.9, 0, 0, Math.PI * 2);
-  g.fill();
-  // clay disc
-  const grad = g.createRadialGradient(cx - r * 0.35, cy - r * 0.4, r * 0.1, cx, cy, r);
-  grad.addColorStop(0, '#FFFFFF');
-  grad.addColorStop(1, col.tint);
-  g.fillStyle = grad;
-  g.beginPath();
-  g.arc(cx, cy, r * 0.92, 0, Math.PI * 2);
-  g.fill();
-  g.lineWidth = r * 0.17;
-  g.strokeStyle = col.main;
-  g.stroke();
-  // emoji
-  g.font = `${Math.round(r * 1.12)}px ${EMOJI_FONT}`;
+  // Bare emoji, glyph ≈ hitbox diameter. A soft blur shadow (not a disc) keeps it readable on the floor.
+  g.shadowColor = 'rgba(30,27,75,0.28)';
+  g.shadowBlur = r * 0.18;
+  g.shadowOffsetY = r * 0.08;
+  g.font = `${Math.round(r * 1.75)}px ${EMOJI_FONT}`;
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  g.fillText(SPECIES_EMOJI[sp], cx, cy + r * 0.07);
+  g.fillText(SPECIES_EMOJI[sp], cx, cy + r * 0.08);
   return c;
 }
 

@@ -6,10 +6,13 @@ import { Emitter } from './dom';
 
 const DEV_KEY = 'tkm.devSession';
 const NEXT_KEY = 'tkm.next';
+const GUEST_KEY = 'tkm.guestSession';
 
 let config: PublicConfig | null = null;
 let supabase: SupabaseClient | null = null;
 let devSession: AuthSession | null = null;
+/** Guest session (no account, no refresh). When present it is the active session in both modes. */
+let guestSession: AuthSession | null = null;
 let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 let refreshing: Promise<AuthSession | null> | null = null;
 let me: MeResponse | null = null;
@@ -28,6 +31,14 @@ export function getConfig(): PublicConfig {
 export async function initAuth(cfg: PublicConfig): Promise<void> {
   config = cfg;
   setTokenProvider(getToken, () => authEvents.emit('unauthorized', undefined));
+  try {
+    const g = localStorage.getItem(GUEST_KEY);
+    guestSession = g ? (JSON.parse(g) as AuthSession) : null;
+  } catch {
+    guestSession = null;
+  }
+  // Expired at boot → drop it; the guard then shows the login screen.
+  if (guestSession && !(guestSession.expires_at - nowSec() > 30)) storeGuest(null);
   if (cfg.mode === 'supabase' && cfg.supabaseUrl && cfg.supabaseAnonKey) {
     const { createClient } = await import('@supabase/supabase-js');
     supabase = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {
@@ -57,6 +68,20 @@ export async function initAuth(cfg: PublicConfig): Promise<void> {
 }
 
 const nowSec = () => Math.floor(Date.now() / 1000);
+
+function storeGuest(s: AuthSession | null): void {
+  guestSession = s;
+  try {
+    if (s) localStorage.setItem(GUEST_KEY, JSON.stringify(s));
+    else localStorage.removeItem(GUEST_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function isGuest(): boolean {
+  return guestSession !== null;
+}
 
 function storeDev(s: AuthSession | null): void {
   devSession = s;
@@ -105,6 +130,14 @@ async function devRefresh(): Promise<AuthSession | null> {
 
 /** A fresh access token, or null if logged out. */
 export async function getToken(forceRefresh = false): Promise<string | null> {
+  if (guestSession) {
+    // Guests can't refresh: an expired guest session simply ends.
+    if (guestSession.expires_at - nowSec() > 5) return guestSession.access_token;
+    storeGuest(null);
+    me = null;
+    authEvents.emit('change', false);
+    return null;
+  }
   if (supabase) {
     if (forceRefresh) {
       const { data } = await supabase.auth.refreshSession();
@@ -123,6 +156,7 @@ export async function isLoggedIn(): Promise<boolean> {
 }
 
 async function adoptSession(s: AuthSession): Promise<void> {
+  storeGuest(null); // a real login replaces any guest session
   if (supabase) {
     const { error } = await supabase.auth.setSession({ access_token: s.access_token, refresh_token: s.refresh_token });
     if (error) throw error;
@@ -141,8 +175,24 @@ export async function register(username: string, email: string, password: string
   await adoptSession(await api.register(username, email, password));
 }
 
+export async function loginAsGuest(): Promise<void> {
+  const s = await api.guest();
+  storeGuest(s);
+  me = null;
+  authEvents.emit('change', true);
+}
+
+/** Drop the guest session (e.g. "Sign up" from a guest profile). */
+export function endGuestSession(): void {
+  if (!guestSession) return;
+  storeGuest(null);
+  me = null;
+  authEvents.emit('change', false);
+}
+
 export async function loginWithGoogle(): Promise<void> {
   if (!supabase) throw new Error('Google login is unavailable right now.');
+  storeGuest(null);
   const { error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: { redirectTo: location.origin },
@@ -152,6 +202,7 @@ export async function loginWithGoogle(): Promise<void> {
 
 export async function logout(): Promise<void> {
   me = null;
+  storeGuest(null);
   if (supabase) await supabase.auth.signOut({ scope: 'local' });
   else storeDev(null);
   authEvents.emit('change', false);
